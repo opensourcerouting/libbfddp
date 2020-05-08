@@ -39,6 +39,8 @@
 
 /** Macro to test for full buffer. */
 #define BFDDP_BUF_FULL(buf) ((buf)->position == (buf)->total)
+/** Macro to test for empty buffer. */
+#define BFDDP_BUF_EMPTY(buf) ((buf)->packet == (buf)->position)
 
 /**
  * Primite buffer structure.
@@ -134,8 +136,16 @@ bfddp_buf_pulldown(struct bfddp_buf *buf)
 {
 	size_t movebytes;
 
+	/* Buffer is already organized. */
 	if (buf->position == 0)
 		return;
+
+	/* No data is available, just update the pointers. */
+	if (BFDDP_BUF_EMPTY(buf)) {
+		buf->remaining = buf->total;
+		buf->position = 0;
+		buf->packet = 0;
+	}
 
 	/* Calculate the amount of bytes we need to move. */
 	movebytes = buf->position - buf->packet;
@@ -187,6 +197,37 @@ bfddp_buf_read(int sock, struct bfddp_buf *buf)
 	/* Update pointers. */
 	buf->position += (size_t)rv;
 	buf->remaining -= (size_t)rv;
+
+	return rv;
+}
+
+static ssize_t
+bfddp_buf_write(int sock, struct bfddp_buf *buf)
+{
+	ssize_t rv;
+
+	/* Buffer empty check so we avoid false connection close returns. */
+	if (BFDDP_BUF_EMPTY(buf))
+		return 0;
+
+	/* Write to the socket data as much as we can. */
+	rv = write(sock, buf->buf + buf->packet, buf->position - buf->packet);
+	/* Connection closed, return error. */
+	if (rv == 0) {
+		errno = 0;
+		return -1;
+	}
+	if (rv == -1) {
+		/* We've got interrupted, this is not an error. */
+		if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)
+			return 0;
+
+		/* Connection failed badly, return error. */
+		return -1;
+	}
+
+	/* Update pointers. */
+	buf->packet += (size_t)rv;
 
 	return rv;
 }
@@ -326,4 +367,56 @@ void
 bfddp_read_finish(struct bfddp_ctx *bctx)
 {
 	bfddp_buf_pulldown(&bctx->inbuf);
+}
+
+size_t
+bfddp_write_enqueue(struct bfddp_ctx *bctx, const struct bfddp_message *msg)
+{
+	struct bfddp_buf *buf = &bctx->outbuf;
+	size_t amount;
+
+	amount = msg->length;
+	/* Buffer is full, tell user about it. */
+	if (amount > buf->remaining)
+		return 0;
+
+	/* Enqueue the message. */
+	memcpy(buf->buf + buf->position, msg, amount);
+	buf->position += amount;
+	buf->remaining -= amount;
+	return amount;
+}
+
+ssize_t
+bfddp_write(struct bfddp_ctx *bctx)
+{
+	struct bfddp_buf *buf = &bctx->outbuf;
+	ssize_t rv, total = 0;
+
+	/* Check if write buffer is empty. */
+	if (BFDDP_BUF_EMPTY(buf)) {
+		/* If buffer is empty we get optimized pulldown or nop. */
+		bfddp_buf_pulldown(buf);
+		return 0;
+	}
+
+	/* Write to socket until buffer is empty or interrupted. */
+	do {
+		rv = bfddp_buf_write(bctx->sock, buf);
+		/* Connection closed or failed. */
+		if (rv == -1)
+			return -1;
+
+		total += rv;
+
+		/* Check for empty buffers. */
+		if (BFDDP_BUF_EMPTY(buf))
+			return total;
+
+		/* We've got interrupted. */
+		if (rv == 0)
+			return total;
+	} while (rv > 0);
+
+	return total;
 }

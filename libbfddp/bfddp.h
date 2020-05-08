@@ -110,4 +110,35 @@ struct bfddp_message *bfddp_next_message(struct bfddp_ctx *bctx);
  */
 void bfddp_read_finish(struct bfddp_ctx *bctx);
 
+/**
+ * Buffer BFD daemon messages in context. After filling the buffer the
+ * function `bfddp_write()` should be called to send the buffered
+ * messages.
+ *
+ * \param[in,out] bctx the BFD daemon communication context.
+ * \param[in] msg the BFD daemon message.
+ *
+ * \returns `0` on full buffer or the number of bytes buffered.
+ *
+ * \see bfddp_write.
+ */
+size_t bfddp_write_enqueue(struct bfddp_ctx *bctx,
+			   const struct bfddp_message *msg);
+
+/**
+ * Write to BFD daemon socket buffered data. Messages can be enqueued to
+ * be sent using `bfddp_write_enqueue()`.
+ *
+ * This function should be only called after `bfddp_connect`.
+ *
+ * \param[in,out] bctx the BFD daemon communication context.
+ *
+ * \returns
+ * `-1` on failure (socket needs to be reopened), `0` on interruptions or
+ * empty buffers and number of bytes sent on success.
+ *
+ * \see bfddp_connect, bfddp_write_enqueue.
+ */
+ssize_t bfddp_write(struct bfddp_ctx *bctx);
+
 #endif /* BFD_DP_H */
