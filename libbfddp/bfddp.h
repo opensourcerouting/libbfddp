@@ -56,6 +56,25 @@ struct bfddp_ctx
 struct bfddp_ctx *bfddp_new(size_t inbuflen, size_t outbuflen);
 
 /**
+ * Releases all allocated memory and socket.
+ *
+ * \param[in,out] bctx the BFD daemon communication context.
+ */
+void bfddp_free(struct bfddp_ctx *bctx);
+
+/**
+ * Get the BFD Data Plane socket file descriptor. This function should only be
+ * called after a successful `bfddp_connect()`.
+ *
+ * \param[in,out] bctx the BFD daemon communication context.
+ *
+ * \returns `-1` on closed socket or a valid file descriptor.
+ *
+ * \see bfddp_connect.
+ */
+int bfddp_get_fd(const struct bfddp_ctx *bctx);
+
+/**
  * Creates the BFD daemon socket to exchange the messages.
  *
  * \param[in,out] bctx the BFD daemon communication context.

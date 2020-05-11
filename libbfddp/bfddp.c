@@ -261,6 +261,9 @@ bfddp_new(size_t inbuflen, size_t outbuflen)
 	bctx->inbuf.total = bctx->inbuf.remaining = inbuflen;
 	bctx->outbuf.total = bctx->outbuf.remaining = outbuflen;
 
+	/* Initialize socket with known good value. */
+	bctx->sock = -1;
+
 	return bctx;
 
 free_and_fail:
@@ -268,6 +271,23 @@ free_and_fail:
 	free(bctx->outbuf.buf);
 	free(bctx);
 	return NULL;
+}
+
+void
+bfddp_free(struct bfddp_ctx *bctx)
+{
+	if (bctx->sock != -1)
+		close(bctx->sock);
+
+	free(bctx->inbuf.buf);
+	free(bctx->outbuf.buf);
+	free(bctx);
+}
+
+int
+bfddp_get_fd(const struct bfddp_ctx *bctx)
+{
+	return bctx->sock;
 }
 
 int
