@@ -187,9 +187,9 @@ struct bfddp_control_packet {
 };
 
 /**
- * The protocol wire messages structure.
+ * The protocol wire message header structure.
  */
-struct bfddp_message {
+struct bfddp_message_header {
 	/** Protocol version format. \see BFD_DP_VERSION. */
 	uint8_t version;
 	/** Reserved / zero field. */
@@ -198,6 +198,14 @@ struct bfddp_message {
 	uint16_t type;
 	/** Message length. */
 	uint16_t length;
+};
+
+/**
+ * The protocol wire messages structure.
+ */
+struct bfddp_message {
+	/** Message header. \see bfddp_message_header. */
+	struct bfddp_message_header header;
 
 	/** Message payload. \see bfddp_message_type. */
 	union {
