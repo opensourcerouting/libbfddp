@@ -89,6 +89,17 @@ int bfddp_connect(struct bfddp_ctx *bctx, const struct sockaddr *sa,
 		  socklen_t salen);
 
 /**
+ * Tests if socket is connected or not and update status.
+ *
+ * \param[in,out] bctx the BFD daemon communication context.
+ *
+ * \returns `-1` on unrecoverable error (see `errno` for more details),
+ * `1` if still not connected (see `errno` for more details) otherwise
+ * `0` when connected.
+ */
+int bfddp_is_connected(struct bfddp_ctx *bctx);
+
+/**
  * Read from BFD daemon socket and buffer internally. After calling this
  * function `bfddp_next_message` should be called to get the messages
  * from buffer.

@@ -232,6 +232,59 @@ bfddp_buf_write(int sock, struct bfddp_buf *buf)
 	return rv;
 }
 
+/**
+ * Test if non blocking `connect()` is still running.
+ *
+ * \param sock non blocking socket that already ran `connect()`.
+ *
+ * \returns `-1` on `getsockopt` failure, `0` on success or `connect()`
+ * `errno`.
+ */
+static int
+socktcp_is_connected(int sock)
+{
+	int rv = 0;
+	socklen_t rvlen = sizeof(rv);
+
+	if (getsockopt(sock, SOL_SOCKET, SO_ERROR, &rv, &rvlen) == -1)
+		return -1;
+
+	return rv;
+}
+
+int
+bfddp_is_connected(struct bfddp_ctx *bctx)
+{
+	int rv;
+
+	/* We are already connected. */
+	if (bctx->connecting == false)
+		return 0;
+
+	rv = socktcp_is_connected(bctx->sock);
+
+	/* Test for successfully connected. */
+	if (rv == 0) {
+		bctx->connecting = false;
+		return 0;
+	}
+
+	/* Handle error codes. */
+	switch (rv) {
+	case EINTR:
+	case EAGAIN:
+	case EALREADY:
+	case EINPROGRESS:
+		/* All of these are non-errors. */
+		errno = rv;
+		return 1;
+
+	default:
+		errno = rv;
+		return -1;
+	}
+}
+
 /*
  * Exported functions.
  */
@@ -314,7 +367,7 @@ bfddp_connect(struct bfddp_ctx *bctx, const struct sockaddr *sa,
 
 	/* Start the attempt of connecting. */
 	rv = connect(sock, sa, salen);
-	if (rv == -1 && errno != EINPROGRESS) {
+	if (rv == -1 && (errno != EINPROGRESS && errno != EAGAIN)) {
 		sock_close(sock);
 		return -1;
 	}
