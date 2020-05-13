@@ -196,6 +196,8 @@ struct bfddp_message_header {
 	uint8_t zero;
 	/** Message contents type. \see bfddp_message_type. */
 	uint16_t type;
+	/* Reserved / zero field. */
+	uint16_t zero2;
 	/** Message length. */
 	uint16_t length;
 };
