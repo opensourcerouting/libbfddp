@@ -401,8 +401,16 @@ bfddp_main(const struct sockaddr *sa, socklen_t salen)
 
 			/* Attempt to flush output buffer. */
 			rv = bfddp_write(bctx);
-			if (rv == -1)
-				err(1, "%s: bfddp_write", __func__);
+			if (rv == -1) {
+				/* Connection failed. */
+				if (errno != 0)
+					err(1, "%s: bfddp_write", __func__);
+
+				/* Connection closed. */
+				printf("%s: bfddp_write: closed connection\n",
+				       __func__);
+				exit(1);
+			}
 			if (rv > 0)
 				printf("=> Sent %zd bytes\n", rv);
 		}
@@ -411,8 +419,16 @@ bfddp_main(const struct sockaddr *sa, socklen_t salen)
 		if (pfs[0].revents & POLLIN) {
 			/* Read as much as we can. */
 			rv = bfddp_read(bctx);
-			if (rv == -1)
-				err(1, "%s: bfddp_read", __func__);
+			if (rv == -1) {
+				/* Connection failed. */
+				if (errno != 0)
+					err(1, "%s: bfddp_read", __func__);
+
+				/* Connection closed. */
+				printf("%s: bfddp_read: closed connection\n",
+				       __func__);
+				exit(1);
+			}
 			if (rv > 0)
 				printf("<= Received %zd bytes\n", rv);
 

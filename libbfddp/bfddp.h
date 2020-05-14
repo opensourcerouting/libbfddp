@@ -112,6 +112,9 @@ int bfddp_is_connected(struct bfddp_ctx *bctx);
  * `-1` on failure (socket needs to be reopened), `0` on interruptions or
  * full buffers and number of bytes read on success.
  *
+ * If the return is `-1` and the `errno` is `0` then it was a normal
+ * connection close (the other side called `close()` on the socket).
+ *
  * \see bfddp_connect.
  */
 ssize_t bfddp_read(struct bfddp_ctx *bctx);
@@ -166,6 +169,9 @@ size_t bfddp_write_enqueue(struct bfddp_ctx *bctx,
  * \returns
  * `-1` on failure (socket needs to be reopened), `0` on interruptions or
  * empty buffers and number of bytes sent on success.
+ *
+ * If the return is `-1` and the `errno` is `0` then it was a normal
+ * connection close (the other side called `close()` on the socket).
  *
  * \see bfddp_connect, bfddp_write_enqueue.
  */
