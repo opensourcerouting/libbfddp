@@ -58,6 +58,15 @@ enum bfddp_message_type {
 
 /**
  * `ECHO_REQUEST`/`ECHO_REPLY` data payload.
+ *
+ * Data plane might use whatever precision it wants for `dp_time`
+ * field, however if you want to be able to tell the delay between
+ * data plane packet send and BFD daemon packet processing you should
+ * use `gettimeofday()` and have the data plane clock sincronized with
+ * BFD daemon (not a problem if data plane runs in the same system).
+ *
+ * Normally data plane will only check the timestamp it sent to determine
+ * the whole packet trip time.
  */
 struct bfddp_echo {
 	/** Filled by data plane. */

@@ -30,6 +30,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <sys/time.h>
 
 #include <err.h>
 #include <errno.h>
@@ -233,6 +234,7 @@ static void
 bfddp_send_echo_request(struct bfddp_ctx *bctx)
 {
 	struct bfddp_message msg = {};
+	struct timeval tv;
 
 	/* Prepare header. */
 	msg.header.version = BFD_DP_VERSION;
@@ -241,7 +243,9 @@ bfddp_send_echo_request(struct bfddp_ctx *bctx)
 	msg.header.type = htons(ECHO_REQUEST);
 
 	/* Payload data. */
-	msg.data.echo.dp_time = hu64tonu64((uint64_t)time(NULL));
+	gettimeofday(&tv, NULL);
+	msg.data.echo.dp_time =
+		hu64tonu64((uint64_t)((tv.tv_sec * 1000000) + tv.tv_usec));
 
 	if (bfddp_write_enqueue(bctx, &msg) == 0)
 		errx(1, "%s: bfddp_write_enqueue failed", __func__);
@@ -251,7 +255,7 @@ static void
 bfddp_send_echo_reply(struct bfddp_ctx *bctx, uint64_t bfdd_time)
 {
 	struct bfddp_message msg = {};
-	uint64_t dp_time = (uint64_t)time(NULL);
+	struct timeval tv;
 
 	/* Prepare header. */
 	msg.header.version = BFD_DP_VERSION;
@@ -260,11 +264,34 @@ bfddp_send_echo_reply(struct bfddp_ctx *bctx, uint64_t bfdd_time)
 	msg.header.type = htons(ECHO_REPLY);
 
 	/* Payload data. */
-	msg.data.echo.dp_time = hu64tonu64(dp_time);
+	gettimeofday(&tv, NULL);
+	msg.data.echo.dp_time =
+		hu64tonu64((uint64_t)((tv.tv_sec * 1000000) + tv.tv_usec));
 	msg.data.echo.bfdd_time = bfdd_time;
 
 	if (bfddp_write_enqueue(bctx, &msg) == 0)
 		errx(1, "%s: bfddp_write_enqueue failed", __func__);
+}
+
+static void
+bfddp_process_echo_time(const struct bfddp_echo *echo)
+{
+	uint64_t bfdt, dpt, dpt_total;
+	struct timeval tv;
+
+	/* Collect registered timestamps. */
+	bfdt = nu64tohu64(echo->bfdd_time);
+	dpt = nu64tohu64(echo->dp_time);
+
+	/* Measure new time. */
+	gettimeofday(&tv, NULL);
+
+	/* Calculate total time taken until here. */
+	dpt_total = (uint64_t)((tv.tv_sec * 1000000) + tv.tv_usec);
+
+	printf("echo-reply: BFD process time was %" PRIu64 " microseconds. "
+	       "Packet total processing time was %" PRIu64 " microseconds\n",
+	       bfdt - dpt, dpt_total - dpt);
 }
 
 /*
@@ -468,16 +495,7 @@ bfddp_handle_message(struct bfddp_ctx *bctx)
 			bfddp_send_echo_reply(bctx, msg->data.echo.bfdd_time);
 			break;
 		case ECHO_REPLY:
-			msg->data.echo.bfdd_time =
-				nu64tohu64(msg->data.echo.bfdd_time);
-			msg->data.echo.dp_time =
-				nu64tohu64(msg->data.echo.dp_time);
-			printf("echo-reply: dp_time=%" PRIu64
-			       " bfdd_time=%" PRIu64 ": delay is %" PRIu64
-			       " seconds\n",
-			       msg->data.echo.dp_time, msg->data.echo.bfdd_time,
-			       msg->data.echo.bfdd_time
-				       - msg->data.echo.dp_time);
+			bfddp_process_echo_time(&msg->data.echo);
 			break;
 		case DP_ADD_SESSION:
 			printf("Received add-session message\n");
