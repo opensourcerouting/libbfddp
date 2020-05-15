@@ -92,6 +92,9 @@ enum bfddp_session_flag {
 
 /**
  * `DP_ADD_SESSION`/`DP_DELETE_SESSION` data payload.
+ *
+ * `lid` is unique in BFD daemon so it might be used as key for data
+ * structures lookup.
  */
 struct bfddp_session {
 	/** Important session flags. \see bfddp_session_flag. */
@@ -108,14 +111,38 @@ struct bfddp_session {
 	 * Check `flags` field for `SESSION_IPV6` before using as IPv6.
 	 */
 	struct in6_addr dst;
+
+	/** Local discriminator. */
+	uint32_t lid;
+	/**
+	 * Minimum desired transmission interval (in microseconds) without
+	 * jitter.
+	 */
+	uint32_t min_tx;
+	/**
+	 * Required minimum receive interval rate (in microseconds) without
+	 * jitter.
+	 */
+	uint32_t min_rx;
+	/**
+	 * Required minimum echo receive interval rate (in microseconds)
+	 * without jitter.
+	 */
+	uint32_t min_echo_rx;
+
 	/** Minimum TTL. */
 	uint8_t ttl;
 	/** Detection multiplier. */
 	uint8_t detect_mult;
+	/** Reserved / zeroed. */
+	uint16_t zero;
+
 	/** Interface index (set to `-1` when unavailable). */
 	int32_t ifindex;
 	/** Interface name (empty when unavailable). */
 	char ifname[64];
+
+	/* TODO: missing authentication. */
 };
 
 /** BFD packet state values as defined in RFC 5880, Section 4.1. */
@@ -152,10 +179,24 @@ enum bfd_diagnostic_value {
 	DIAG_REV_CONCAT_PATH_DOWN = 8,
 };
 
+/** BFD remote state flags. */
+enum bfd_remote_flags {
+	/** Control Plane Independent bit. */
+	RBIT_CPI = (1 << 0),
+	/** Demand mode bit. */
+	RBIT_DEMAND = (1 << 1),
+	/** Multipoint bit. */
+	RBIT_MP = (1 << 2),
+};
+
 /**
  * `BFD_STATE_CHANGE` data payload.
  */
 struct bfddp_state_change {
+	/** Local discriminator. */
+	uint32_t lid;
+	/** Remote configurations/bits set. \see bfd_remote_flags. */
+	uint32_t remote_flags;
 	/** Remote state. \see bfd_state_values.*/
 	uint8_t state;
 	/** Remote diagnostics (if any) */
