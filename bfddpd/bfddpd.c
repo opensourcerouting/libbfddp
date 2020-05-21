@@ -505,21 +505,9 @@ bfddp_handle_message(struct bfddp_ctx *bctx)
 			printf("Received delete-session message\n");
 			/* TODO: implement hardware session removal. */
 			break;
-		case DP_SEND_SINGLE_PACKET:
-			printf("Received send-single-packet message\n");
-			/* TODO: implement hardware single packet send. */
-			break;
-		case DP_SEND_PACKET:
-			printf("Received send-packet message\n");
-			/* TODO: implement hardware repeated packet send. */
-			break;
 		case BFD_STATE_CHANGE:
 			/* XXX: we are not supposed to receive this message. */
 			printf("Received wrong state-change mesage\n");
-			break;
-		case BFD_CONTROL_PACKET:
-			/* XXX: we are not supposed to receive this message. */
-			printf("Received wrong control-packet message\n");
 			break;
 
 		default:

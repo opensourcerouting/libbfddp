@@ -46,14 +46,8 @@ enum bfddp_message_type {
 	DP_ADD_SESSION = 2,
 	/** Delete BFD peer session. */
 	DP_DELETE_SESSION = 3,
-	/** Tell data plane to send this packet. */
-	DP_SEND_SINGLE_PACKET = 4,
-	/** Tell data plane to repeatedly send this packet. */
-	DP_SEND_PACKET = 5,
 	/** Tell BFD daemon state changed: timer expired or session down. */
-	BFD_STATE_CHANGE = 6,
-	/** Send BFD daemon a unexpected control packet. */
-	BFD_CONTROL_PACKET = 7,
+	BFD_STATE_CHANGE = 4,
 };
 
 /**
@@ -88,6 +82,8 @@ enum bfddp_session_flag {
 	SESSION_ECHO = (1 << 3),
 	/** Set when using IPv6. */
 	SESSION_IPV6 = (1 << 4),
+	/** Set when using passive mode. */
+	SESSION_PASSIVE = (1 << 5),
 };
 
 /**
@@ -129,6 +125,11 @@ struct bfddp_session {
 	 * without jitter.
 	 */
 	uint32_t min_echo_rx;
+	/**
+	 * Amount of milliseconds to wait before starting sending session
+	 * packets (only works when `SESSION_PASSIVE` flag is not set).
+	 */
+	uint32_t hold_time;
 
 	/** Minimum TTL. */
 	uint8_t ttl;
@@ -204,7 +205,7 @@ struct bfddp_state_change {
 };
 
 /**
- * `BFD_CONTROL_PACKET` data payload.
+ * BFD control packet.
  */
 struct bfddp_control_packet {
 	/** (3 bits version << 5) | (5 bits diag). */
