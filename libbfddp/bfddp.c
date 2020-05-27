@@ -471,13 +471,6 @@ bfddp_write(struct bfddp_ctx *bctx)
 	struct bfddp_buf *buf = &bctx->outbuf;
 	ssize_t rv, total = 0;
 
-	/* Check if write buffer is empty. */
-	if (BFDDP_BUF_EMPTY(buf)) {
-		/* If buffer is empty we get optimized pulldown or nop. */
-		bfddp_buf_pulldown(buf);
-		return 0;
-	}
-
 	/* Write to socket until buffer is empty or interrupted. */
 	do {
 		rv = bfddp_buf_write(bctx->sock, buf);
@@ -488,8 +481,10 @@ bfddp_write(struct bfddp_ctx *bctx)
 		total += rv;
 
 		/* Check for empty buffers. */
-		if (BFDDP_BUF_EMPTY(buf))
+		if (BFDDP_BUF_EMPTY(buf)) {
+			bfddp_buf_pulldown(buf);
 			return total;
+		}
 
 		/* We've got interrupted. */
 		if (rv == 0)
