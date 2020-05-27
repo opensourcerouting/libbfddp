@@ -454,4 +454,7 @@ bfddp_handle_message(struct events_ctx *ec, struct bfddp_ctx *bctx)
 			break;
 		}
 	} while (msg != NULL);
+
+	/* We are done reading the messages, reorganize the buffer. */
+	bfddp_read_finish(bctx);
 }
