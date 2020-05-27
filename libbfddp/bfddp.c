@@ -498,3 +498,11 @@ bfddp_write(struct bfddp_ctx *bctx)
 
 	return total;
 }
+
+size_t
+bfddp_write_pending(struct bfddp_ctx *bctx)
+{
+	struct bfddp_buf *buf = &bctx->outbuf;
+
+	return buf->position - buf->packet;
+}

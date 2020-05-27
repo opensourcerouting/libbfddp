@@ -177,4 +177,13 @@ size_t bfddp_write_enqueue(struct bfddp_ctx *bctx,
  */
 ssize_t bfddp_write(struct bfddp_ctx *bctx);
 
+/**
+ * Function to get the amount of bytes pending to be sent.
+ *
+ * \param bctx the BFD daemon communication context.
+ *
+ * \returns `0` if output buffer is empty otherwise the number of bytes.
+ */
+size_t bfddp_write_pending(struct bfddp_ctx *bctx);
+
 #endif /* BFD_DP_H */
