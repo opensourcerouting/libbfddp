@@ -48,6 +48,11 @@ enum bfddp_message_type {
 	DP_DELETE_SESSION = 3,
 	/** Tell BFD daemon state changed: timer expired or session down. */
 	BFD_STATE_CHANGE = 4,
+
+	/** Ask for BFD session counters. */
+	DP_REQUEST_SESSION_COUNTERS = 5,
+	/** Tell BFD daemon about counters values. */
+	BFD_SESSION_COUNTERS = 6,
 };
 
 /**
@@ -254,6 +259,44 @@ struct bfddp_message_header {
 };
 
 /**
+ * Data plane session counters request.
+ *
+ * Message type: `DP_REQUEST_SESSION_COUNTERS`.
+ */
+struct bfddp_request_counters {
+	/** Session local discriminator. */
+	uint32_t lid;
+};
+
+/**
+ * BFD session counters reply.
+ *
+ * Message type: `BFD_SESSION_COUNTERS`.
+ */
+struct bfddp_session_counters {
+	/** Session local discriminator. */
+	uint32_t lid;
+
+	/** Control packet bytes input. */
+	uint64_t control_input_bytes;
+	/** Control packets input. */
+	uint64_t control_input_packets;
+	/** Control packet bytes output. */
+	uint64_t control_output_bytes;
+	/** Control packets output. */
+	uint64_t control_output_packets;
+
+	/** Echo packet bytes input. */
+	uint64_t echo_input_bytes;
+	/** Echo packets input. */
+	uint64_t echo_input_packets;
+	/** Echo packet bytes output. */
+	uint64_t echo_output_bytes;
+	/** Echo packets output. */
+	uint64_t echo_output_packets;
+};
+
+/**
  * The protocol wire messages structure.
  */
 struct bfddp_message {
@@ -266,6 +309,8 @@ struct bfddp_message {
 		struct bfddp_session session;
 		struct bfddp_state_change state;
 		struct bfddp_control_packet control;
+		struct bfddp_request_counters counters_req;
+		struct bfddp_session_counters session_counters;
 	} data;
 };
 
