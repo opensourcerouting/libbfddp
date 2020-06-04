@@ -201,6 +201,8 @@ enum bfd_remote_flags {
 struct bfddp_state_change {
 	/** Local discriminator. */
 	uint32_t lid;
+	/** Remote discriminator. */
+	uint32_t rid;
 	/** Remote configurations/bits set. \see bfd_remote_flags. */
 	uint32_t remote_flags;
 	/** Remote state. \see bfd_state_values.*/
