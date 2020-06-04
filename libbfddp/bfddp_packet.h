@@ -212,7 +212,30 @@ struct bfddp_state_change {
 };
 
 /**
+ * BFD control packet state bits definition.
+ */
+enum bfddp_control_state_bits {
+	/** Used to request connection establishement signal. */
+	STATE_POLL_BIT = (1 << 5),
+	/** Finalizes the connection establishement signal. */
+	STATE_FINAL_BIT = (1 << 4),
+	/**
+	 * Signalizes that the peer forward plane doesn't depend on control
+	 * plane.
+	 */
+	STATE_CPI_BIT = (1 << 3),
+	/** Signalizes the use of authentication. */
+	STATE_AUTH_BIT = (1 << 2),
+	/** Signalizes that peer is using demand mode. */
+	STATE_DEMAND_BIT = (1 << 1),
+	/** Used in RFC 8562 implementation. */
+	STATE_MULTI_BIT = (1 << 0),
+};
+
+/**
  * BFD control packet.
+ *
+ * As defined in 'RFC 5880 Section 4.1 Generic BFD Control Packet Format'.
  */
 struct bfddp_control_packet {
 	/** (3 bits version << 5) | (5 bits diag). */
@@ -220,12 +243,7 @@ struct bfddp_control_packet {
 	/**
 	 * (2 bits state << 6) | (6 bits flags)
 	 *
-	 * Flag bits:
-	 * - `(1 << 4)`: Poll bit.
-	 * - `(1 << 3)`: Final bit.
-	 * - `(1 << 2)`: Control Plane Independent bit.
-	 * - `(1 << 1)`: Authentication present bit.
-	 * - `(1 << 0)`: Demand mode bit.
+	 * \see bfd_state_value, bfddp_control_state_bits.
 	 */
 	uint8_t state_bits;
 	/** Detection multiplier. */
