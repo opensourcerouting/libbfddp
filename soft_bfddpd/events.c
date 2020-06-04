@@ -321,7 +321,7 @@ events_ctx_del_timer(struct events_ctx *ec, struct timer_ctx **tc)
 	struct timer_ctx *tcp;
 
 	/* Convenience: allow user to pass NULL pointers. */
-	if (tc == NULL)
+	if (*tc == NULL)
 		return;
 
 	tcp = *tc;
