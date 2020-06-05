@@ -505,6 +505,13 @@ bfddp_handle_message(struct bfddp_ctx *bctx)
 			printf("Received delete-session message\n");
 			/* TODO: implement hardware session removal. */
 			break;
+		case DP_REQUEST_SESSION_COUNTERS:
+			printf("Received request session counters\n");
+			/* TODO: implement session counters sending. */
+			break;
+
+		case BFD_SESSION_COUNTERS:
+			/* FALLTHROUGH. */
 		case BFD_STATE_CHANGE:
 			/* XXX: we are not supposed to receive this message. */
 			printf("Received wrong state-change mesage\n");
