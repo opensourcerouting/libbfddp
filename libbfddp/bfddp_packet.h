@@ -143,8 +143,8 @@ struct bfddp_session {
 	/** Reserved / zeroed. */
 	uint16_t zero;
 
-	/** Interface index (set to `-1` when unavailable). */
-	int32_t ifindex;
+	/** Interface index (set to `0` when unavailable). */
+	uint32_t ifindex;
 	/** Interface name (empty when unavailable). */
 	char ifname[64];
 
