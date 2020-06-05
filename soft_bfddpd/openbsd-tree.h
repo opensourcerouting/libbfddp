@@ -28,6 +28,7 @@
 #define _SYS_TREE_H_
 
 #include <stdlib.h>
+#include <stddef.h>
 
 #define __unused __attribute__((unused))
 

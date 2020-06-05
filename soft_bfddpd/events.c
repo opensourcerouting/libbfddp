@@ -34,7 +34,6 @@
 #include <sys/poll.h>
 #include <time.h>
 
-#include <stddef.h>
 #include "openbsd-tree.h"
 
 #include "bfddpd.h"
