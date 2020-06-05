@@ -89,9 +89,9 @@ static int
 timerst_cmp(const struct timer_ctx *tca, const struct timer_ctx *tcb)
 {
 	/* Organize by clock first. */
-	if (tca->tc_toc > tcb->tc_toc)
+	if (tca->tc_toc < tcb->tc_toc)
 		return -1;
-	else if (tca->tc_toc < tcb->tc_toc)
+	else if (tca->tc_toc > tcb->tc_toc)
 		return 1;
 
 	/* Then by timeouts, callbacks and args. */
@@ -351,7 +351,7 @@ events_ctx_next_timeout(struct events_ctx *ec)
 	      + (uint64_t)(ec->ec_tv.tv_nsec / 1000000);
 
 	/* Calculate the next timer expiration. */
-	ec->ec_to = (tc->tc_toc < now) ? -1 : (int)(tc->tc_toc - now);
+	ec->ec_to = (tc->tc_toc < now) ? 0 : (int)(tc->tc_toc - now);
 
 	dlog("next timeout: %d ms", ec->ec_to);
 }
