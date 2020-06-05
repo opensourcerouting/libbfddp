@@ -19,9 +19,11 @@ target_include_directories(bfddpd PUBLIC libbfddp)
 add_executable(
   soft_bfddpd
   soft_bfddpd/bfddpd.c
+  soft_bfddpd/debug.c
   soft_bfddpd/events.c
   soft_bfddpd/openbsd-tree.c
   soft_bfddpd/packet.c
+  soft_bfddpd/session.c
   )
 
 target_link_libraries(soft_bfddpd libbfddp)

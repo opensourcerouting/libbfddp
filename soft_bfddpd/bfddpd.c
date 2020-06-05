@@ -25,10 +25,10 @@
 
 #include <arpa/inet.h>
 #include <sys/poll.h>
-#include <sys/types.h>
 #include <sys/socket.h>
-#include <sys/un.h>
 #include <sys/time.h>
+#include <sys/types.h>
+#include <sys/un.h>
 
 #include <err.h>
 #include <errno.h>
@@ -67,6 +67,11 @@ static void bfddp_terminate(struct bfddp_ctx *bctx);
  * Handle messages received by BFD daemon.
  */
 static void bfddp_handle_message(struct events_ctx *ec, struct bfddp_ctx *bctx);
+
+/**
+ * Handle common read/write events.
+ */
+static int bfddp_event(struct events_ctx *ec, int fd, short revents, void *arg);
 
 /*
  * Helper functions.
@@ -251,12 +256,16 @@ main(int argc, char *argv[])
 /* Forward declaration. */
 static int bfddp_connect_event(struct events_ctx *ec, int fd, short revents,
 			       void *arg);
+static int bfd_single_hop_socket(void);
+static int bfd_single_hop_recv(struct events_ctx *ec, int sock, short revents,
+			       void *arg);
 
 static void __attribute__((noreturn))
 bfddp_main(const struct sockaddr *sa, socklen_t salen)
 {
 	struct bfddp_ctx *bctx;
 	struct events_ctx *ec;
+	int shbfd = bfd_single_hop_socket();
 
 	/* Create event handler. */
 	ec = events_ctx_new(64);
@@ -276,12 +285,29 @@ bfddp_main(const struct sockaddr *sa, socklen_t salen)
 	events_ctx_add_fd(ec, bfddp_get_fd(bctx), POLLOUT, bfddp_connect_event,
 			  bctx);
 
+	/* Ask for events context to notify us. */
+	events_ctx_add_fd(ec, shbfd, POLLIN, bfd_single_hop_recv, NULL);
+
 	/* Main daemon loop. */
 	while (events_ctx_poll(ec) != -1) {
+		/*
+		 * Add our descriptor for read/write when there are writes
+		 * pending.
+		 */
+		if (bfddp_write_pending(bctx))
+			events_ctx_add_fd(ec, bfddp_get_fd(bctx),
+					  POLLIN | POLLOUT, bfddp_event, bctx);
+
 		/* Handle termination signals. */
 		if (is_terminating) {
+			/* Finish BFD session management resources. */
+			bfd_session_finish();
+
 			/* Free events context memory. */
 			events_ctx_free(&ec);
+
+			/* Close BFD socket. */
+			close(shbfd);
 
 			/* Free library memory. */
 			bfddp_terminate(bctx);
@@ -292,9 +318,6 @@ bfddp_main(const struct sockaddr *sa, socklen_t salen)
 	/* NOTREACHED */
 	exit(0);
 }
-
-/* Forward declaration. */
-static int bfddp_event(struct events_ctx *ec, int fd, short revents, void *arg);
 
 static int
 bfddp_connect_event(struct events_ctx *ec, int fd, short revents, void *arg)
@@ -432,13 +455,11 @@ bfddp_handle_message(struct events_ctx *ec, struct bfddp_ctx *bctx)
 			break;
 		case ECHO_REPLY:
 			bfddp_process_echo_time(&msg->data.echo);
-			printf("Ask again in 5 seconds\n");
 			events_ctx_add_timer(ec, 5000, bfddp_echo_request_event,
 					     bctx);
 			break;
 		case DP_ADD_SESSION:
-			printf("Received add-session message\n");
-			/* TODO: implement software session (re)installation. */
+			bfd_session_new(ec, bctx, &msg->data.session);
 			break;
 		case DP_DELETE_SESSION:
 			printf("Received delete-session message\n");
@@ -464,4 +485,61 @@ bfddp_handle_message(struct events_ctx *ec, struct bfddp_ctx *bctx)
 
 	/* We are done reading the messages, reorganize the buffer. */
 	bfddp_read_finish(bctx);
+}
+
+static int
+bfd_single_hop_recv(__attribute__((unused)) struct events_ctx *ec, int sock,
+		    short revents, __attribute__((unused)) void *arg)
+{
+	if (revents & (POLLERR | POLLHUP | POLLNVAL))
+		errx(1, "poll returned bad value");
+
+	/* Handle incoming packet. */
+	bfd_recv_control_packet(sock);
+
+	/* Always read more. */
+	return POLLIN;
+}
+
+static int
+bfd_single_hop_socket(void)
+{
+	int rv, sock, value;
+	struct sockaddr_in sin = {};
+
+	sock = socket(AF_INET, SOCK_DGRAM, 0);
+	if (sock == -1)
+		err(1, "%s: socket", __func__);
+
+	/* Set packet TTL. */
+	value = 255;
+	rv = setsockopt(sock, IPPROTO_IP, IP_TTL, &value, sizeof(value));
+	if (rv == -1)
+		err(1, "%s: setsockopt(IP_TTL)", __func__);
+
+	/* Receive the packet TTL information from `recvmsg`. */
+	value = 1;
+	rv = setsockopt(sock, IPPROTO_IP, IP_RECVTTL, &value, sizeof(value));
+	if (rv == -1)
+		err(1, "%s: setsockopt(IP_RECVTTL)", __func__);
+
+	/* Receive the interface information from `recvmsg`. */
+	value = 1;
+	rv = setsockopt(sock, IPPROTO_IP, IP_PKTINFO, &value, sizeof(value));
+	if (rv == -1)
+		err(1, "%s: setsockopt(IP_PKTINFO)", __func__);
+
+	/* Re use addr if someone else is using it. */
+	value = 1;
+	rv = setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &value, sizeof(value));
+	if (rv == -1)
+		err(1, "%s: setsockopt(SO_REUSEADDR)", __func__);
+
+	sin.sin_family = AF_INET;
+	sin.sin_addr.s_addr = htonl(INADDR_ANY);
+	sin.sin_port = htons(BFD_SINGLE_HOP_PORT);
+	if (bind(sock, (struct sockaddr *)&sin, sizeof(sin)) == -1)
+		err(1, "%s: bind", __func__);
+
+	return sock;
 }
