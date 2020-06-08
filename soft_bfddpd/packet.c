@@ -32,6 +32,7 @@
 
 #include <err.h>
 #include <errno.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "bfddp.h"
@@ -155,8 +156,9 @@ bfddp_send_session_state_change(const struct bfd_session *bs)
 
 	msg.data.state.remote_flags = htonl(msg.data.state.remote_flags);
 
-	if (bfddp_write_enqueue(bs->bs_bctx, &msg) == 0)
+	if (bfddp_write_enqueue(bs->bs_bctx, &msg) == 0) {
 		plog("state change enqueue failed");
+	}
 }
 
 /*
@@ -212,8 +214,9 @@ bfd_send_control_packet(const struct bfd_session *bs)
 		salen = sizeof(struct sockaddr_in6);
 
 	if (sendto(bs->bs_sock, &cp, cp.length, 0, &bs->bs_dst.bs_dst_sa, salen)
-	    <= 0)
+	    <= 0) {
 		plog("sendto failed: %s", strerror(errno));
+	}
 }
 
 static void
@@ -247,8 +250,9 @@ _bfd_recv_packet_v4(struct msghdr *msg, struct bfd_packet_metadata *bpm)
 			break;
 		case IP_TTL:
 			ttl = *(int32_t *)CMSG_DATA(cmsg);
-			if (ttl < 0 || ttl > 255)
+			if (ttl < 0 || ttl > 255) {
 				plog("bad TTL %d", ttl);
+			}
 
 			bpm->bpm_ttl = (uint8_t)ttl;
 			break;
@@ -299,8 +303,9 @@ _bfd_recv_packet_v6(struct msghdr *msg, struct bfd_packet_metadata *bpm)
 			break;
 		case IPV6_HOPLIMIT:
 			ttl = *(int32_t *)CMSG_DATA(cmsg);
-			if (ttl < 0 || ttl > 255)
+			if (ttl < 0 || ttl > 255) {
 				plog("bad TTL %d", ttl);
+			}
 
 			bpm->bpm_ttl = (uint8_t)ttl;
 			break;

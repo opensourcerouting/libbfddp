@@ -26,6 +26,7 @@
 #include <arpa/inet.h>
 
 #include <stdarg.h>
+#include <stdio.h>
 
 #include "bfddp.h"
 #include "bfddp_packet.h"

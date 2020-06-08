@@ -58,7 +58,6 @@ void bfd_session_dump(const struct bfd_session *bs);
  * events.c.
  */
 #ifdef EVENTS_DEBUG
-#include <stdio.h>
 #define dlog(fmt, args...) printf("events: " fmt "\n", ##args)
 #else
 #define dlog(fmt, args...) /* empty */
