@@ -562,7 +562,7 @@ bfd_session_control_rx_timeout(__attribute__((unused)) struct events_ctx *ec,
 
 	/* Tell FRR's BFD daemon the session is down. */
 	bs->bs_state = STATE_DOWN;
-	bs->bs_diag = DIAG_CONTROL_EXPIRED;
+	bs->bs_diag = bs->bs_rdiag = DIAG_CONTROL_EXPIRED;
 	bfd_session_set_slowstart(bs);
 	bfddp_send_session_state_change(bs);
 

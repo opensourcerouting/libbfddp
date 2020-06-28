@@ -147,7 +147,7 @@ bfddp_send_session_state_change(const struct bfd_session *bs)
 	msg.data.state.lid = htonl(bs->bs_lid);
 	msg.data.state.rid = htonl(bs->bs_rid);
 	msg.data.state.state = (uint8_t)bs->bs_state;
-	msg.data.state.diagnostics = (uint8_t)bs->bs_diag;
+	msg.data.state.diagnostics = (uint8_t)bs->bs_rdiag;
 
 	if (bs->bs_rcbit)
 		msg.data.state.remote_flags |= RBIT_CPI;
