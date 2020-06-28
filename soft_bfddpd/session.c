@@ -430,6 +430,9 @@ bfd_session_sm_down(struct bfd_session *bs, enum bfd_state_value nstate)
 	case STATE_DOWN:
 		bs->bs_state = STATE_INIT;
 		bfd_session_debug(bs, "down -> init");
+
+		/* Notify state change. */
+		bfddp_send_session_state_change(bs);
 		break;
 	case STATE_INIT:
 		bs->bs_state = STATE_UP;
@@ -437,6 +440,9 @@ bfd_session_sm_down(struct bfd_session *bs, enum bfd_state_value nstate)
 
 		/* Start polling. */
 		bs->bs_poll = true;
+
+		/* Notify state change. */
+		bfddp_send_session_state_change(bs);
 		break;
 	case STATE_UP:
 		/* NOTHING: we haven't and the peer hasn't sent INIT yet. */
@@ -451,6 +457,9 @@ bfd_session_sm_init(struct bfd_session *bs, enum bfd_state_value nstate)
 	case STATE_ADMINDOWN:
 		bs->bs_state = STATE_DOWN;
 		bfd_session_debug(bs, "init -> down");
+
+		/* Notify state change. */
+		bfddp_send_session_state_change(bs);
 		break;
 	case STATE_DOWN:
 		/* We are waiting peer's INIT. */
@@ -464,6 +473,9 @@ bfd_session_sm_init(struct bfd_session *bs, enum bfd_state_value nstate)
 
 		/* Start polling. */
 		bs->bs_poll = true;
+
+		/* Notify state change. */
+		bfddp_send_session_state_change(bs);
 		break;
 	}
 }
@@ -481,6 +493,9 @@ bfd_session_sm_up(struct bfd_session *bs, enum bfd_state_value nstate)
 		/* Disable echo timers. */
 
 		bfd_session_debug(bs, "up -> down");
+
+		/* Notify state change. */
+		bfddp_send_session_state_change(bs);
 		break;
 	case STATE_INIT:
 		/* FALLTHROUGH. */
@@ -555,6 +570,7 @@ bfd_session_control_rx_timeout(__attribute__((unused)) struct events_ctx *ec,
 			       void *arg)
 {
 	struct bfd_session *bs = arg;
+	enum bfd_state_value pstate = bs->bs_state;
 
 	bfd_session_debug(bs, "control packet receive timeout");
 
@@ -564,7 +580,16 @@ bfd_session_control_rx_timeout(__attribute__((unused)) struct events_ctx *ec,
 	bs->bs_state = STATE_DOWN;
 	bs->bs_diag = bs->bs_rdiag = DIAG_CONTROL_EXPIRED;
 	bfd_session_set_slowstart(bs);
-	bfddp_send_session_state_change(bs);
+
+	/*
+	 * Only send notification if state changed.
+	 *
+	 * This prevents a extra notification in case the remote peer
+	 * asked and ceased to send control packets earlier than expiration
+	 * timer.
+	 */
+	if (bs->bs_state != pstate)
+		bfddp_send_session_state_change(bs);
 
 	/* Remove the timer pointer since we'll get rid of it. */
 	bs->bs_rxev = NULL;
