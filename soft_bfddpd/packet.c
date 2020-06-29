@@ -486,16 +486,34 @@ bfd_recv_control_packet(int sock)
 	bs->bs_rcbit = !!(bcp->state_bits & STATE_CPI_BIT);
 	bs->bs_rdemand = !!(bcp->state_bits & STATE_DEMAND_BIT);
 
-	/* Terminate poll sequence. */
+	/*
+	 * RFC 5880 Section 6.8.6. Reception of BFD Control Packets:
+	 *
+	 * > If a Poll Sequence is being transmitted by the local system
+	 * > and the Final (F) bit in the received packet is set, the
+	 * > Poll Sequence MUST be terminated.
+	 */
+	if (bs->bs_poll && (bcp->state_bits & STATE_FINAL_BIT)) {
+		bs->bs_poll = false;
+		bs->bs_final = false;
+		bfd_session_final_event(bs);
+	}
+
+	/*
+	 * RFC 5880 Section 6.8.6. Reception of BFD Control Packets:
+	 *
+	 * > If the Poll (P) bit is set, send a BFD Control packet to the
+	 * > remote system with the Poll (P) bit clear, and the Final (F)
+	 * >  bit set (see section 6.8.7).
+	 */
 	if (bcp->state_bits & STATE_POLL_BIT) {
 		bs->bs_poll = false;
 		bs->bs_final = true;
 
 		/* Speed up session convergence. */
 		bfd_send_control_packet(bs);
-	} else if (bcp->state_bits & STATE_FINAL_BIT) {
+
 		bs->bs_final = false;
-		bfd_session_final_event(bs);
 	}
 
 	bfd_session_state_machine(bs, bs->bs_rstate);
