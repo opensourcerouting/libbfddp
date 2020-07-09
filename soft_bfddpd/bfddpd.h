@@ -229,7 +229,7 @@ void bfddp_process_echo_time(const struct bfddp_echo *echo);
 void bfddp_send_session_state_change(const struct bfd_session *bs);
 
 /* BFD Protocol packets. */
-void bfd_send_control_packet(const struct bfd_session *bs);
+void bfd_send_control_packet(struct bfd_session *bs);
 
 /** Packet read data+metadata. */
 struct bfd_packet_metadata {
@@ -381,6 +381,15 @@ struct bfd_session {
 
 	/** Session socket. */
 	int bs_sock;
+
+	/** Session control packet input counter. */
+	uint64_t bs_crx_bytes;
+	/** Session control packet bytes input counter. */
+	uint64_t bs_crx_packets;
+	/** Session control packet output counter. */
+	uint64_t bs_ctx_bytes;
+	/** Session control packet bytes output counter. */
+	uint64_t bs_ctx_packets;
 
 	RBT_ENTRY(bfd_session) entry;
 };

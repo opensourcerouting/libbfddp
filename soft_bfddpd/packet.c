@@ -165,12 +165,13 @@ bfddp_send_session_state_change(const struct bfd_session *bs)
  * BFD Protocol.
  */
 void
-bfd_send_control_packet(const struct bfd_session *bs)
+bfd_send_control_packet(struct bfd_session *bs)
 {
 	struct bfddp_control_packet cp = {};
 	socklen_t salen;
 	bool poll = bs->bs_poll;
 	uint8_t state = bs->bs_state & 0x03;
+	ssize_t rv;
 
 	/* Sanity check: don't allow POLL and FINAL in the same packet. */
 	if (bs->bs_poll && bs->bs_final) {
@@ -213,10 +214,15 @@ bfd_send_control_packet(const struct bfd_session *bs)
 	else
 		salen = sizeof(struct sockaddr_in6);
 
-	if (sendto(bs->bs_sock, &cp, cp.length, 0, &bs->bs_dst.bs_dst_sa, salen)
-	    <= 0) {
+	rv = sendto(bs->bs_sock, &cp, cp.length, 0, &bs->bs_dst.bs_dst_sa,
+		    salen);
+	if (rv <= 0) {
 		plog("sendto failed: %s", strerror(errno));
 	}
+
+	/* Update session output data. */
+	bs->bs_ctx_bytes += (size_t)rv;
+	bs->bs_ctx_packets++;
 }
 
 static void
@@ -464,6 +470,10 @@ bfd_recv_control_packet(int sock)
 			return;
 		}
 	}
+
+	/* Update session input data. */
+	bs->bs_crx_bytes += bpm.bpm_datalen;
+	bs->bs_crx_packets++;
 
 	/* Alert about unsupported modes. */
 	if (bcp->state_bits & STATE_AUTH_BIT) {
