@@ -398,7 +398,7 @@ bfd_session_new(struct events_ctx *ec, struct bfddp_ctx *bctx,
 	bs->bs_sock = -1;
 
 	/* Local settings. */
-	bs->bs_lid = bdps->lid;
+	bs->bs_lid = ntohl(bdps->lid);
 	bs->bs_state = STATE_DOWN;
 	bfd_session_set_slowstart(bs);
 
