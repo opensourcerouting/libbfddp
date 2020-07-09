@@ -435,6 +435,13 @@ void bfd_session_update(struct bfd_session *bs,
 			const struct bfddp_session *bdps);
 
 /**
+ * Deletes BFD session using FRR's BFD message information.
+ *
+ * \param bdps FRR's BFD message.
+ */
+void bfd_session_delete(const struct bfddp_session *bdps);
+
+/**
  * Look up session using discriminator.
  *
  * \param lid the local discriminator.

@@ -413,6 +413,33 @@ bfd_session_new(struct events_ctx *ec, struct bfddp_ctx *bctx,
 	return bs;
 }
 
+void
+bfd_session_delete(const struct bfddp_session *bdps)
+{
+	struct bfd_session *bs;
+
+	bs = bfd_session_lookup(ntohl(bdps->lid));
+	if (bs == NULL) {
+		slog("%s: failed to find session %u", __func__,
+		     ntohl(bdps->lid));
+		return;
+	}
+
+	/* Remove all timers. */
+	events_ctx_del_timer(bs->bs_ec, &bs->bs_rxev);
+	events_ctx_del_timer(bs->bs_ec, &bs->bs_txev);
+
+	/* Remove from data structures. */
+	RBT_REMOVE(bsessionst, &bsessionst, bs);
+
+	/* Close socket. */
+	if (bs->bs_sock >= 0)
+		close(bs->bs_sock);
+
+	/* Free remaining memory. */
+	free(bs);
+}
+
 static void
 bfd_session_sm_admindown(__attribute__((unused)) struct bfd_session *bs,
 			 __attribute__((unused)) enum bfd_state_value nstate)

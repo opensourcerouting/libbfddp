@@ -462,8 +462,7 @@ bfddp_handle_message(struct events_ctx *ec, struct bfddp_ctx *bctx)
 			bfd_session_new(ec, bctx, &msg->data.session);
 			break;
 		case DP_DELETE_SESSION:
-			printf("Received delete-session message\n");
-			/* TODO: implement software session removal. */
+			bfd_session_delete(&msg->data.session);
 			break;
 		case DP_REQUEST_SESSION_COUNTERS:
 			bfd_session_reply_counters(bctx, msg);
