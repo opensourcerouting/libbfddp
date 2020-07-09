@@ -272,8 +272,13 @@ struct bfddp_message_header {
 	uint8_t zero;
 	/** Message contents type. \see bfddp_message_type. */
 	uint16_t type;
-	/* Reserved / zero field. */
-	uint16_t zero2;
+	/**
+	 * Message identification (to pair request/response).
+	 *
+	 * The ID `0` is reserved for asynchronous messages (e.g. unrequested
+	 * messages).
+	 */
+	uint16_t id;
 	/** Message length. */
 	uint16_t length;
 };
