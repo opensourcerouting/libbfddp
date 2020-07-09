@@ -466,8 +466,7 @@ bfddp_handle_message(struct events_ctx *ec, struct bfddp_ctx *bctx)
 			/* TODO: implement software session removal. */
 			break;
 		case DP_REQUEST_SESSION_COUNTERS:
-			printf("Received request session counters\n");
-			/* TODO: implement session counters sending. */
+			bfd_session_reply_counters(bctx, msg);
 			break;
 
 		case BFD_SESSION_COUNTERS:

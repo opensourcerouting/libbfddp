@@ -161,6 +161,50 @@ bfddp_send_session_state_change(const struct bfd_session *bs)
 	}
 }
 
+int
+bfd_session_reply_counters(struct bfddp_ctx *bctx,
+			   const struct bfddp_message *msg)
+{
+	struct bfddp_message rmsg = {};
+	struct bfd_session *bs =
+		bfd_session_lookup(ntohl(msg->data.counters_req.lid));
+	uint16_t msglen =
+		sizeof(rmsg.header) + sizeof(rmsg.data.session_counters);
+
+	/* Fill in message header. */
+	rmsg.header.version = BFD_DP_VERSION;
+	rmsg.header.length = htons(msglen);
+	rmsg.header.type = htons(BFD_SESSION_COUNTERS);
+	rmsg.header.id = msg->header.id;
+
+	/* Copy ID as is. */
+	rmsg.data.counters_req.lid = msg->data.counters_req.lid;
+
+	/* Failed to find session. */
+	if (bs == NULL) {
+		slog("%s: failed to find session", __func__);
+
+		/* Send answer anyway so it doesn't wait forever. */
+		bfddp_write_enqueue(bctx, &rmsg);
+		return -1;
+	}
+
+	/* Fill payload. */
+	rmsg.data.session_counters.control_input_bytes =
+		hu64tonu64(bs->bs_crx_bytes);
+	rmsg.data.session_counters.control_input_packets =
+		hu64tonu64(bs->bs_crx_packets);
+	rmsg.data.session_counters.control_output_bytes =
+		hu64tonu64(bs->bs_ctx_bytes);
+	rmsg.data.session_counters.control_output_packets =
+		hu64tonu64(bs->bs_ctx_packets);
+
+	if (bfddp_write_enqueue(bs->bs_bctx, &rmsg) == 0)
+		return -1;
+
+	return 0;
+}
+
 /*
  * BFD Protocol.
  */

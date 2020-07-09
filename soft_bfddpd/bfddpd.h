@@ -228,6 +228,15 @@ void bfddp_send_echo_reply(struct bfddp_ctx *bctx, uint64_t bfdd_time);
 void bfddp_process_echo_time(const struct bfddp_echo *echo);
 void bfddp_send_session_state_change(const struct bfd_session *bs);
 
+/**
+ * Sends back to BFD daemon the updated session counters.
+ *
+ * \param bctx the data plane context to return answer.
+ * \param msg the request message.
+ */
+int bfd_session_reply_counters(struct bfddp_ctx *bctx,
+			       const struct bfddp_message *msg);
+
 /* BFD Protocol packets. */
 void bfd_send_control_packet(struct bfd_session *bs);
 
