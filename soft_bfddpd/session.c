@@ -684,6 +684,9 @@ bfd_session_final_event(struct bfd_session *bs)
 	bfd_session_update_control_rx(bs);
 	bfd_session_update_control_tx(bs);
 
+	/* Send updated timers to control plane. */
+	bfddp_send_session_state_change(bs);
+
 	bfd_session_debug(bs, "final event");
 	bfd_session_dump(bs);
 }

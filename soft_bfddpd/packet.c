@@ -148,6 +148,10 @@ bfddp_send_session_state_change(const struct bfd_session *bs)
 	msg.data.state.rid = htonl(bs->bs_rid);
 	msg.data.state.state = (uint8_t)bs->bs_state;
 	msg.data.state.diagnostics = (uint8_t)bs->bs_rdiag;
+	msg.data.state.detection_multiplier = bs->bs_rdmultiplier;
+	msg.data.state.desired_tx = htonl(bs->bs_rtx);
+	msg.data.state.required_rx = htonl(bs->bs_rrx);
+	msg.data.state.required_echo_rx = htonl(bs->bs_rerx);
 
 	if (bs->bs_rcbit)
 		msg.data.state.remote_flags |= RBIT_CPI;
@@ -446,6 +450,7 @@ bfd_recv_control_packet(int sock)
 	struct bfd_session *bs;
 	enum bfd_state_value state;
 	int plen;
+	bool timers_changed = false;
 	struct bfd_packet_metadata bpm = {};
 
 	plen = bfd_recv_packet(sock, &bpm);
@@ -533,6 +538,17 @@ bfd_recv_control_packet(int sock)
 	bs->bs_rstate = state;
 	bs->bs_rdiag = bcp->version_diag & 0x1F;
 	bs->bs_rid = ntohl(bcp->local_id);
+
+	/* Detect timers change: */
+	if (ntohl(bcp->desired_tx) != bs->bs_rtx)
+		timers_changed = true;
+	else if (ntohl(bcp->required_rx) != bs->bs_rrx)
+		timers_changed = true;
+	else if (ntohl(bcp->required_echo_rx) != bs->bs_rerx)
+		timers_changed = true;
+	else if (bcp->detection_multiplier != bs->bs_rdmultiplier)
+		timers_changed = true;
+
 	bs->bs_rtx = ntohl(bcp->desired_tx);
 	bs->bs_rrx = ntohl(bcp->required_rx);
 	bs->bs_rerx = ntohl(bcp->required_echo_rx);
@@ -551,6 +567,13 @@ bfd_recv_control_packet(int sock)
 		bs->bs_poll = false;
 		bs->bs_final = false;
 		bfd_session_final_event(bs);
+	} else {
+		/*
+		 * Notify control plane about new timers if this is not the
+		 * final event.
+		 */
+		if (timers_changed)
+			bfddp_send_session_state_change(bs);
 	}
 
 	/*
