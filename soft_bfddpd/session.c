@@ -379,7 +379,7 @@ bfd_session_new(struct events_ctx *ec, struct bfddp_ctx *bctx,
 	struct bfd_session *bs;
 
 	/* Look up session first. */
-	bs = bfd_session_lookup(bdps->lid);
+	bs = bfd_session_lookup(ntohl(bdps->lid));
 	if (bs != NULL) {
 		bfd_session_update(bs, bdps);
 		return bs;
