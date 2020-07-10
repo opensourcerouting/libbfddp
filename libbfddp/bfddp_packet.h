@@ -205,10 +205,18 @@ struct bfddp_state_change {
 	uint32_t rid;
 	/** Remote configurations/bits set. \see bfd_remote_flags. */
 	uint32_t remote_flags;
+	/** Remote minimum desired transmission interval. */
+	uint32_t desired_tx;
+	/** Remote minimum receive interval. */
+	uint32_t required_rx;
+	/** Remote minimum echo receive interval. */
+	uint32_t required_echo_rx;
 	/** Remote state. \see bfd_state_values.*/
 	uint8_t state;
 	/** Remote diagnostics (if any) */
 	uint8_t diagnostics;
+	/** Remote detection multiplier. */
+	uint8_t detection_multiplier;
 };
 
 /**
