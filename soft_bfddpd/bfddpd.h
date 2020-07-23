@@ -54,6 +54,16 @@ void bfd_session_debug(const struct bfd_session *bs, const char *fmt, ...)
  */
 void bfd_session_dump(const struct bfd_session *bs);
 
+/**
+ * Return a string representing the BFD session state.
+ */
+const char *bfd_session_get_state_string(enum bfd_state_value state);
+
+/**
+ * Return a string representing the BFD session diagnotic.
+ */
+const char *bfd_session_get_diag_string(enum bfd_diagnostic_value diag);
+
 /*
  * events.c.
  */
@@ -275,10 +285,16 @@ void bfd_recv_control_packet(int sock);
 #endif /* SESSION_DEBUG */
 
 /** BFD single hop UDP port, as defined in RFC 5881 Section 4. Encapsulation. */
-#define BFD_SINGLE_HOP_PORT 3786
+#define BFD_SINGLE_HOP_PORT 3784
+
+/* BFD single hop echo UDP port, as defind in RFC 5881 Section 4. Encapsulation. */
+#define BFD_SINGLE_HOP_ECHO_PORT 3785
 
 /** BFD multi hop UDP port, as defined in RFC 5883 Section 5. Encapsulation. */
 #define BFD_MULTI_HOP_PORT 4784
+
+/** BFD protocol version, as defind in RFC5880 Section 4.1 Generic BFD Control Packet Format. */
+#define BFD_PROTOCOL_VERSION 1
 
 #define SLOWSTART_DMULT 3
 #define SLOWSTART_TX 1000000u
@@ -291,6 +307,21 @@ void bfd_recv_control_packet(int sock);
  */
 #define BFD_SOURCE_PORT_BEGIN 49152
 #define BFD_SOURCE_PORT_END 65535
+
+struct bfd_error_statistics {
+	/** Number of packets with invalid length */
+	uint64_t invalid_len_drops;
+	/** Number of packets with invalid BFD version */
+	uint64_t version_drops;
+	/** Number of packets with invalid detection multiplier */
+	uint64_t multiplier_drops;
+	/** Number of packets with multi-point set */
+	uint64_t multi_point_drops;
+	/** Number of packets with invalid My Discriminator */
+	uint64_t my_disc_drops;
+	/** Number of packates with invalid session information */
+	uint64_t invalid_session_drops;
+};
 
 struct bfd_session {
 	/** Events context pointer for scheduling timers/fds. */
@@ -391,14 +422,18 @@ struct bfd_session {
 	/** Session socket. */
 	int bs_sock;
 
-	/** Session control packet input counter. */
-	uint64_t bs_crx_bytes;
 	/** Session control packet bytes input counter. */
+	uint64_t bs_crx_bytes;
+	/** Session control packet input counter. */
 	uint64_t bs_crx_packets;
-	/** Session control packet output counter. */
-	uint64_t bs_ctx_bytes;
 	/** Session control packet bytes output counter. */
+	uint64_t bs_ctx_bytes;
+	/** Session control packet output counter. */
 	uint64_t bs_ctx_packets;
+	/** Number of times this session went UP */
+	uint64_t bs_up_count;
+	/** Number of times this session went DOWN */
+	uint64_t bs_down_count;
 
 	RBT_ENTRY(bfd_session) entry;
 };
@@ -490,5 +525,24 @@ void bfd_session_update_control_tx(struct bfd_session *bs);
  * \param bs the BFD session.
  */
 void bfd_session_final_event(struct bfd_session *bs);
+
+/**
+ * Generate a random number.
+ */
+uint32_t bfd_session_random(void);
+
+/**
+ * Generate a locally unique discriminator.
+ */
+uint32_t bfd_session_gen_discriminator(void);
+
+/**
+ * Set the state of the BFD session state machine.
+ *
+ * \param bs the BFD session.
+ * \param state the new state
+ */
+void bfd_session_set_state(struct bfd_session *bs, enum bfd_state_value state);
+
 
 #endif /* _SOFT_BFDDP_H */

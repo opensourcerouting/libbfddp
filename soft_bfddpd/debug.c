@@ -32,6 +32,31 @@
 #include "bfddp_packet.h"
 #include "bfddpd.h"
 
+static const char *bfd_session_states[] = {
+	"ADMIN DOWN",
+	"DOWN",
+	"INIT",
+	"UP"
+};
+
+_Static_assert(sizeof(bfd_session_states)/sizeof(*bfd_session_states) == (STATE_UP + 1),
+			   "bfd_session_states[] array item(s) missing!");
+
+static const char *bfd_session_diags[] = {
+	"Nothing",
+	"Control detection time expired",
+	"Echo function failed",
+	"Neighbor signaled down",
+	"Forwarding plane reset",
+	"Path down",
+	"Concatenated path down",
+	"Administratively down",
+	"Reverse concatenated path down"
+};
+
+_Static_assert(sizeof(bfd_session_diags)/sizeof(*bfd_session_diags) == (DIAG_REV_CONCAT_PATH_DOWN + 1),
+			   "bfd_session_diags[] array item(s) missing!");
+
 void
 bfd_session_debug(const struct bfd_session *bs, const char *fmt, ...)
 {
@@ -91,4 +116,22 @@ bfd_session_dump(const struct bfd_session *bs)
 		bs->bs_echo ? "echo " : "", bs->bs_tx, bs->bs_rx, bs->bs_erx,
 		bs->bs_rtx, bs->bs_rrx, bs->bs_rerx, bs->bs_dmultiplier,
 		bs->bs_rdmultiplier);
+}
+
+const char *bfd_session_get_state_string(enum bfd_state_value state)
+{
+	if ((state >= STATE_ADMINDOWN) && (state <= STATE_UP)) {
+		return bfd_session_states[state];
+	} else {
+		return "Unknown";
+	}
+}
+
+const char *bfd_session_get_diag_string(enum bfd_diagnostic_value diag)
+{
+	if ((diag >= DIAG_NOTHING) && (diag <= DIAG_REV_CONCAT_PATH_DOWN)) {
+		return bfd_session_diags[diag];
+	} else {
+		return "Unknown";
+	}
 }

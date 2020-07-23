@@ -360,7 +360,8 @@ bfddp_write_event(struct bfddp_ctx *bctx)
 		/* Connection closed. */
 		printf("%s: bfddp_write: closed connection\n",
 		       __func__);
-		exit(1);
+		is_terminating = true;
+		return;
 	}
 	if (rv > 0)
 		printf("=> Sent %zd bytes\n", rv);
@@ -381,7 +382,8 @@ bfddp_read_event(struct events_ctx *ec, struct bfddp_ctx *bctx)
 		/* Connection closed. */
 		printf("%s: bfddp_read: closed connection\n",
 		       __func__);
-		exit(1);
+		is_terminating = true;
+		return;
 	}
 	if (rv > 0)
 		printf("<= Received %zd bytes\n", rv);

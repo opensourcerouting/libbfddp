@@ -39,6 +39,9 @@
 #include "bfddp_packet.h"
 #include "bfddpd.h"
 
+/* Error statistics */
+static struct bfd_error_statistics error_stats;
+
 static uint64_t
 hu64tonu64(uint64_t value)
 {
@@ -452,6 +455,7 @@ bfd_recv_control_packet(int sock)
 	int plen;
 	bool timers_changed = false;
 	struct bfd_packet_metadata bpm = {};
+	uint8_t version;
 
 	plen = bfd_recv_packet(sock, &bpm);
 	/* Assert we have the received the whole packet. */
@@ -464,6 +468,15 @@ bfd_recv_control_packet(int sock)
 	/* Check packet header length. */
 	if (bcp->length < sizeof(*bcp) || bcp->length > plen) {
 		plog("invalid packet header length (%d)", plen);
+		error_stats.invalid_len_drops++;
+		return;
+	}
+
+	/* Invalid version. */
+	version = (bcp->version_diag >> 5) & 0x07;
+	if (version != BFD_PROTOCOL_VERSION) {
+		plog("invalid BFD protocol version (%d)", version);
+		error_stats.version_drops++;
 		return;
 	}
 
@@ -471,18 +484,21 @@ bfd_recv_control_packet(int sock)
 	if (bcp->detection_multiplier == 0) {
 		plog("invalid packet detection multiplier (%d)",
 		     bcp->detection_multiplier);
+		error_stats.multiplier_drops++;
 		return;
 	}
 
 	/* Discard multi point packets. */
 	if (bcp->state_bits & (STATE_MULTI_BIT)) {
 		plog("multi point not implemented");
+		error_stats.multi_point_drops++;
 		return;
 	}
 
 	/* Discard sessions using ID zero. */
 	if (bcp->local_id == 0) {
 		plog("remote session is using ID zero");
+		error_stats.my_disc_drops++;
 		return;
 	}
 
@@ -490,6 +506,7 @@ bfd_recv_control_packet(int sock)
 	/* Invalid remote ID with established session. */
 	if ((state == STATE_INIT || state == STATE_UP) && bcp->remote_id == 0) {
 		plog("remote peer sent bad local session id");
+		error_stats.invalid_session_drops++;
 		return;
 	}
 
@@ -504,18 +521,21 @@ bfd_recv_control_packet(int sock)
 		bs = bfd_session_lookup_by_packet(&bpm);
 		if (bs == NULL) {
 			plog("session not found");
+			error_stats.invalid_session_drops++;
 			return;
 		}
 	} else {
 		bs = bfd_session_lookup(ntohl(bcp->remote_id));
 		if (bs == NULL) {
 			plog("session for ID %u found", ntohl(bcp->remote_id));
+			error_stats.invalid_session_drops++;
 			return;
 		}
 
 		/* Make sure we are looking at the correct session. */
 		if (bfd_session_extra_check(bs, &bpm) == false) {
 			plog("invalid session address");
+			error_stats.invalid_session_drops++;
 			return;
 		}
 	}
@@ -593,6 +613,7 @@ bfd_recv_control_packet(int sock)
 		bs->bs_final = false;
 	}
 
+	/* Run the state machine. */
 	bfd_session_state_machine(bs, bs->bs_rstate);
 
 	/* We received the peer packet, update the expiration timer. */
