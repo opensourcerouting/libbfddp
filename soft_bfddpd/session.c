@@ -32,6 +32,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "bfddp.h"
@@ -237,7 +238,8 @@ bfd_session_lookup_by_packet(const struct bfd_packet_metadata *bpm)
 	struct sockaddr_in *sin;
 	struct bfd_session *bs;
 
-	RBT_FOREACH(bs, bsessionst, &bsessionst) {
+	RBT_FOREACH(bs, bsessionst, &bsessionst)
+	{
 		/* Filter by interface (if set). */
 		if (bs->bs_ifindex && bs->bs_ifindex != bpm->bpm_ifindex)
 			continue;
@@ -455,18 +457,19 @@ bfd_session_sm_down(struct bfd_session *bs, enum bfd_state_value nstate)
 		/* NOTHING. */
 		break;
 	case STATE_DOWN:
-		bs->bs_state = STATE_INIT;
-		bfd_session_debug(bs, "down -> init");
+		bfd_session_set_state(bs, STATE_INIT);
 
 		/* Notify state change. */
 		bfddp_send_session_state_change(bs);
 		break;
 	case STATE_INIT:
-		bs->bs_state = STATE_UP;
-		bfd_session_debug(bs, "down -> up");
+		bfd_session_set_state(bs, STATE_UP);
 
 		/* Start polling. */
 		bs->bs_poll = true;
+
+		/* Immediately inform the peer */
+		bfd_send_control_packet(bs);
 
 		/* Notify state change. */
 		bfddp_send_session_state_change(bs);
@@ -482,8 +485,7 @@ bfd_session_sm_init(struct bfd_session *bs, enum bfd_state_value nstate)
 {
 	switch (nstate) {
 	case STATE_ADMINDOWN:
-		bs->bs_state = STATE_DOWN;
-		bfd_session_debug(bs, "init -> down");
+		bfd_session_set_state(bs, STATE_DOWN);
 
 		/* Notify state change. */
 		bfddp_send_session_state_change(bs);
@@ -494,12 +496,14 @@ bfd_session_sm_init(struct bfd_session *bs, enum bfd_state_value nstate)
 	case STATE_INIT:
 		/* FALLTHROUGH. */
 	case STATE_UP:
-		bs->bs_state = STATE_UP;
+		bfd_session_set_state(bs, STATE_UP);
 		bs->bs_diag = 0;
-		bfd_session_debug(bs, "init -> up");
 
 		/* Start polling. */
 		bs->bs_poll = true;
+
+		/* Immediately inform the peer */
+		bfd_send_control_packet(bs);
 
 		/* Notify state change. */
 		bfddp_send_session_state_change(bs);
@@ -514,12 +518,10 @@ bfd_session_sm_up(struct bfd_session *bs, enum bfd_state_value nstate)
 	case STATE_ADMINDOWN:
 		/* FALLTHROUGH. */
 	case STATE_DOWN:
-		bs->bs_state = STATE_DOWN;
+		bfd_session_set_state(bs, STATE_DOWN);
 
 		bfd_session_set_slowstart(bs);
 		/* Disable echo timers. */
-
-		bfd_session_debug(bs, "up -> down");
 
 		/* Notify state change. */
 		bfddp_send_session_state_change(bs);
@@ -604,8 +606,9 @@ bfd_session_control_rx_timeout(__attribute__((unused)) struct events_ctx *ec,
 	bfd_session_reset_remote(bs);
 
 	/* Tell FRR's BFD daemon the session is down. */
-	bs->bs_state = STATE_DOWN;
+	bfd_session_set_state(bs, STATE_DOWN);
 	bs->bs_diag = bs->bs_rdiag = DIAG_CONTROL_EXPIRED;
+	bs->bs_rid = 0;
 	bfd_session_set_slowstart(bs);
 
 	/*
@@ -657,7 +660,7 @@ bfd_session_update_control_rx(struct bfd_session *bs)
 	 * > (roughly speaking, due to jitter) the number of packets that have
 	 * > to be missed in a row to declare the session to be down.
 	 */
-	if (bs->bs_cur_rx > bs->bs_rtx)
+	if ((bs->bs_cur_rx > bs->bs_rtx) || (bs->bs_poll))
 		next_to = bs->bs_cur_rx * bs->bs_rdmultiplier;
 	else
 		next_to = bs->bs_rtx * bs->bs_rdmultiplier;
@@ -689,4 +692,53 @@ bfd_session_final_event(struct bfd_session *bs)
 
 	bfd_session_debug(bs, "final event");
 	bfd_session_dump(bs);
+}
+
+void
+bfd_session_set_state(struct bfd_session *bs, enum bfd_state_value state)
+{
+	if ((state >= STATE_ADMINDOWN) && (state <= STATE_UP)) {
+		if ((state == STATE_UP) && (bs->bs_state != STATE_UP)) {
+			bs->bs_up_count++;
+		} else if (((state == STATE_DOWN) || (state == STATE_ADMINDOWN))
+			   && (bs->bs_state != STATE_DOWN)
+			   && (bs->bs_state != STATE_ADMINDOWN)) {
+			bs->bs_down_count++;
+		}
+
+		bfd_session_debug(bs, "State changed %s -> %s",
+				  bfd_session_get_state_string(bs->bs_state),
+				  bfd_session_get_state_string(state));
+		bs->bs_state = state;
+
+	} else {
+		bfd_session_debug(bs, "Unknown state value '%d'", state);
+	}
+}
+
+uint32_t
+bfd_session_random(void)
+{
+	static int initialized = false;
+
+	if (initialized == false) {
+		/* Seed the random number generator */
+		srandom((uint32_t)time(NULL));
+		initialized = true;
+	}
+
+	return (uint32_t)random();
+}
+
+uint32_t
+bfd_session_gen_discriminator(void)
+{
+	uint32_t discriminator;
+
+	do {
+		discriminator = bfd_session_random();
+	} while ((discriminator != 0)
+		 && (bfd_session_lookup(discriminator) != NULL));
+
+	return discriminator;
 }
