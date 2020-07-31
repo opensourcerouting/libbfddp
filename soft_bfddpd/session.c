@@ -93,7 +93,7 @@ bfd_socket(struct sockaddr *sa)
 
 	if (sock_set_nonblock(sock) == -1) {
 		slog("fcntl: %s", strerror(errno));
-		return -1;
+		goto close_and_return;
 	}
 
 	switch (sa->sa_family) {
