@@ -26,12 +26,10 @@
 /* Required from PRIu64 macro. */
 #include <inttypes.h>
 
-#include <errno.h>
-#include <poll.h>
-#include <stdint.h>
-#include <stdlib.h>
-#include <string.h>
 #include <sys/poll.h>
+
+#include <errno.h>
+#include <string.h>
 #include <time.h>
 
 #include "openbsd-tree.h"

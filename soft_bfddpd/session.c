@@ -23,22 +23,13 @@
  * IN THE SOFTWARE.
  */
 
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <sys/types.h>
-
-#include <errno.h>
 #include <fcntl.h>
-#include <stdint.h>
-#include <stdio.h>
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
 
 #include "bfddp_extra.h"
 #include "bfddpd.h"
-
-#include "openbsd-tree.h"
 
 /*
  * BFD Session data structure handling.

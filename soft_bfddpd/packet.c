@@ -26,11 +26,8 @@
 /* Required from PRIu64 macro. */
 #include <inttypes.h>
 
-#include <netinet/in.h>
-#include <sys/socket.h>
 #include <sys/time.h>
 
-#include <err.h>
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>

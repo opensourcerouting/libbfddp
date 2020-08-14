@@ -25,19 +25,12 @@
 
 #include <arpa/inet.h>
 #include <sys/poll.h>
-#include <sys/socket.h>
-#include <sys/time.h>
-#include <sys/types.h>
 #include <sys/un.h>
 
 #include <err.h>
 #include <errno.h>
-#include <poll.h>
 #include <signal.h>
-#include <stdbool.h>
 #include <stdio.h>
-#include <stdlib.h>
-#include <time.h>
 #include <unistd.h>
 
 #include "bfddp.h"
