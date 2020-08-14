@@ -33,6 +33,38 @@
 
 #include <stdint.h>
 
+/*
+ * Protocol definitions.
+ */
+
+/**
+ * BFD protocol version as defined in RFC5880 Section 4.1 Generic BFD Control
+ * Packet Format.
+ */
+#define BFD_PROTOCOL_VERSION 1
+
+/** BFD single hop UDP port, as defined in RFC 5881 Section 4. Encapsulation. */
+#define BFD_SINGLE_HOP_PORT 3784
+
+/** BFD multi hop UDP port, as defined in RFC 5883 Section 5. Encapsulation. */
+#define BFD_MULTI_HOP_PORT 4784
+
+/** Default slow start multiplier. */
+#define SLOWSTART_DMULT 3
+/** Default slow start transmission speed. */
+#define SLOWSTART_TX 1000000u
+/** Default slow start receive speed. */
+#define SLOWSTART_RX 1000000u
+/** Default slow start echo receive speed. */
+#define SLOWSTART_ERX 0u
+
+/*
+ * BFD single hop source UDP ports. As defined in RFC 5881 Section 4.
+ * Encapsulation.
+ */
+#define BFD_SOURCE_PORT_BEGIN 49152
+#define BFD_SOURCE_PORT_END 65535
+
 /** BFD data plane protocol version. */
 #define BFD_DP_VERSION 1
 
@@ -89,6 +121,8 @@ enum bfddp_session_flag {
 	SESSION_IPV6 = (1 << 4),
 	/** Set when using passive mode. */
 	SESSION_PASSIVE = (1 << 5),
+	/** Set when session is administrative down. */
+	SESSION_SHUTDOWN = (1 << 6),
 };
 
 /**

@@ -284,30 +284,6 @@ void bfd_recv_control_packet(int sock);
 #define slog(fmt, args...) /* empty */
 #endif /* SESSION_DEBUG */
 
-/** BFD single hop UDP port, as defined in RFC 5881 Section 4. Encapsulation. */
-#define BFD_SINGLE_HOP_PORT 3784
-
-/* BFD single hop echo UDP port, as defind in RFC 5881 Section 4. Encapsulation. */
-#define BFD_SINGLE_HOP_ECHO_PORT 3785
-
-/** BFD multi hop UDP port, as defined in RFC 5883 Section 5. Encapsulation. */
-#define BFD_MULTI_HOP_PORT 4784
-
-/** BFD protocol version, as defind in RFC5880 Section 4.1 Generic BFD Control Packet Format. */
-#define BFD_PROTOCOL_VERSION 1
-
-#define SLOWSTART_DMULT 3
-#define SLOWSTART_TX 1000000u
-#define SLOWSTART_RX 1000000u
-#define SLOWSTART_ERX 0u
-
-/*
- * BFD single hop source UDP ports. As defined in RFC 5881 Section 4.
- * Encapsulation.
- */
-#define BFD_SOURCE_PORT_BEGIN 49152
-#define BFD_SOURCE_PORT_END 65535
-
 struct bfd_error_statistics {
 	/** Number of packets with invalid length */
 	uint64_t invalid_len_drops;
