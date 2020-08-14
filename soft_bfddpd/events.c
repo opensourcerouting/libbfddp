@@ -176,7 +176,7 @@ events_ctx_add_fd(struct events_ctx *ec, int fd, short events,
 
 	/* Search for subscribed `fd`. */
 	for (i = 0; i < ec->ec_pfds_used; i++) {
-		if (ec->ec_pfds->fd != fd)
+		if (ec->ec_pfds[i].fd != fd)
 			continue;
 
 		pfdc = &ec->ec_pfdcs[i];
@@ -222,6 +222,8 @@ events_ctx_del_fd(struct events_ctx *ec, int fd)
 
 	/* Now we must fill the gap created by the removal. */
 	remaining = (ec->ec_pfds_used - 1) - i;
+	/* Decrement the amount of file descriptors used. */
+	ec->ec_pfds_used -= 1;
 	/* Nothing to move. */
 	if (remaining == 0)
 		return;
