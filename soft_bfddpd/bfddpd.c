@@ -277,6 +277,9 @@ bfddp_main(const struct sockaddr *sa, socklen_t salen)
 	if (bctx == NULL)
 		err(1, "%s: bfddp_new", __func__);
 
+	/* Initialize BFD sessions handler. */
+	bfd_session_init();
+
 	/* Connect to BFD daemon. */
 	if (bfddp_connect(bctx, sa, salen) == -1)
 		err(1, "%s: bfddp_connect", __func__);
@@ -441,6 +444,7 @@ bfddp_echo_request_event(struct events_ctx *ec, void *arg)
 static void
 bfddp_handle_message(struct events_ctx *ec, struct bfddp_ctx *bctx)
 {
+	struct bfd_session *bs;
 	struct bfddp_message *msg;
 	enum bfddp_message_type bmt;
 
@@ -461,13 +465,21 @@ bfddp_handle_message(struct events_ctx *ec, struct bfddp_ctx *bctx)
 					     bctx);
 			break;
 		case DP_ADD_SESSION:
-			bfd_session_new(ec, bctx, &msg->data.session);
+			bs = bfd_session_lookup(ntohl(msg->data.session.lid));
+			if (bs == NULL)
+				bfddp_session_new(bctx, ec, &msg->data.session);
+			else
+				bfddp_session_update(bs, NULL,
+						     &msg->data.session);
 			break;
 		case DP_DELETE_SESSION:
-			bfd_session_delete(&msg->data.session);
+			bs = bfd_session_lookup(ntohl(msg->data.session.lid));
+			bfddp_session_free(&bs, NULL);
 			break;
 		case DP_REQUEST_SESSION_COUNTERS:
-			bfd_session_reply_counters(bctx, msg);
+			bs = bfd_session_lookup(
+				ntohl(msg->data.counters_req.lid));
+			bfddp_session_reply_counters(bctx, msg->header.id, bs);
 			break;
 
 		case BFD_SESSION_COUNTERS:

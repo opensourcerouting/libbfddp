@@ -35,8 +35,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "bfddp.h"
-#include "bfddp_packet.h"
+#include "bfddp_extra.h"
 #include "bfddpd.h"
 
 #include "openbsd-tree.h"
@@ -45,14 +44,17 @@
  * BFD Session data structure handling.
  */
 static int
-bsessions_cmp(const struct bfd_session *bsa, const struct bfd_session *bsb)
+bsessions_cmp(const struct bfd_session_data *bsda,
+	      const struct bfd_session_data *bsdb)
 {
-	return (int)(bsa->bs_lid - bsb->bs_lid);
+	return (int)(bsda->bsd_bs->bs_lid - bsdb->bsd_bs->bs_lid);
 }
 
-RBT_HEAD(bsessionst, bfd_session) bsessionst;
-RBT_PROTOTYPE(bsessionst, bfd_session, entry, bsessions_cmp);
-RBT_GENERATE(bsessionst, bfd_session, entry, bsessions_cmp);
+RBT_HEAD(bsessionst, bfd_session_data) bsessionst;
+RBT_PROTOTYPE(bsessionst, bfd_session_data, entry, bsessions_cmp);
+RBT_GENERATE(bsessionst, bfd_session_data, entry, bsessions_cmp);
+
+static void bfd_session_update_control_tx(struct bfd_session *bs, void *arg);
 
 /*
  * Helper functions.
@@ -192,6 +194,176 @@ close_and_return:
 	return -1;
 }
 
+static int
+bfd_session_new(struct bfd_session *bs, __attribute__((unused)) void *arg)
+{
+	struct events_ctx *ec = arg;
+	struct bfd_session_data *bsd;
+
+	/* Sanity check: duplicated session. */
+	if (bfd_session_lookup(bs->bs_lid) != NULL) {
+		slog("duplicated session detected (lid=%u)", bs->bs_lid);
+		return -1;
+	}
+
+	/* Create if it doesn't exist. */
+	bsd = calloc(1, sizeof(*bsd));
+	if (bsd == NULL) {
+		slog("not enough memory");
+		return -1;
+	}
+
+	/* Copy important pointers. */
+	bs->bs_data = bsd;
+	bsd->bsd_bs = bs;
+	bsd->bsd_ec = ec;
+
+	/* Set file descriptor to invalid value. */
+	bsd->bsd_sock = -1;
+
+	RBT_INSERT(bsessionst, &bsessionst, bsd);
+
+	return 0;
+}
+
+static void
+bfd_session_update(struct bfd_session *bs, __attribute__((unused)) void *arg)
+{
+	struct bfd_session_data *bsd = bs->bs_data;
+
+	/* Create socket only if not open or configuration changed. */
+	if (bsd->bsd_sock != -1) {
+		bfd_session_debug(bs, "update session");
+		bfd_session_dump(bs);
+		return;
+	}
+
+	bfd_session_debug(bs, "new session");
+	bfd_session_dump(bs);
+
+	bsd->bsd_sock = bfd_socket(&bs->bs_src.bs_src_sa);
+}
+
+static void
+bfd_session_free(struct bfd_session *bs, __attribute__((unused)) void *arg)
+{
+	struct bfd_session_data *bsd = bs->bs_data;
+
+	RBT_REMOVE(bsessionst, &bsessionst, bsd);
+	events_ctx_del_fd(bsd->bsd_ec, bsd->bsd_sock);
+	events_ctx_del_timer(bsd->bsd_ec, &bsd->bsd_rxev);
+	events_ctx_del_timer(bsd->bsd_ec, &bsd->bsd_txev);
+
+	if (bsd->bsd_sock >= 0)
+		close(bsd->bsd_sock);
+
+	free(bsd);
+}
+
+static int64_t
+bfd_session_control_tx_timeout(__attribute__((unused)) struct events_ctx *ec,
+			       void *arg)
+{
+	/* Send again. */
+	bfddp_send_control_packet(arg, NULL);
+
+	/* Reschedule timer. */
+	return bfddp_session_next_control_tx_interval(arg) / 1000;
+}
+
+static void
+bfd_session_update_control_tx(struct bfd_session *bs,
+			      __attribute__((unused)) void *arg)
+{
+	struct bfd_session_data *bsd = bs->bs_data;
+
+	bfddp_send_control_packet(bs, arg);
+
+	if (bsd->bsd_txev)
+		bsd->bsd_txev = events_ctx_update_timer(
+			bsd->bsd_ec, bsd->bsd_txev,
+			bfddp_session_next_control_tx_interval(bs) / 1000,
+			bfd_session_control_tx_timeout, bs);
+	else
+		bsd->bsd_txev = events_ctx_add_timer(
+			bsd->bsd_ec,
+			bfddp_session_next_control_tx_interval(bs) / 1000,
+			bfd_session_control_tx_timeout, bs);
+}
+
+static int64_t
+bfd_session_control_rx_timeout(__attribute__((unused)) struct events_ctx *ec,
+			       void *arg)
+{
+	struct bfd_session *bs = arg;
+	struct bfd_session_data *bsd = bs->bs_data;
+
+	bfddp_session_rx_timeout(bs, NULL);
+
+	bfd_session_debug(bs, "control packet receive timeout");
+
+	/* Remove the timer pointer since we'll get rid of it. */
+	bsd->bsd_rxev = NULL;
+
+	/* Get rid of this timer. */
+	return -1;
+}
+
+static void
+bfd_session_stop_control_tx(struct bfd_session *bs,
+			    __attribute__((unused)) void *arg)
+{
+	struct bfd_session_data *bsd = bs->bs_data;
+
+	events_ctx_del_timer(bsd->bsd_ec, &bsd->bsd_txev);
+}
+
+static void
+bfd_session_update_control_rx(struct bfd_session *bs,
+			      __attribute__((unused)) void *arg)
+{
+	struct bfd_session_data *bsd = bs->bs_data;
+
+	if (bsd->bsd_rxev)
+		bsd->bsd_rxev = events_ctx_update_timer(
+			bsd->bsd_ec, bsd->bsd_rxev,
+			bfddp_session_next_control_rx_interval(bs) / 1000,
+			bfd_session_control_rx_timeout, bs);
+	else
+		bsd->bsd_rxev = events_ctx_add_timer(
+			bsd->bsd_ec,
+			bfddp_session_next_control_rx_interval(bs) / 1000,
+			bfd_session_control_rx_timeout, bs);
+}
+
+static void
+bfd_session_stop_control_rx(struct bfd_session *bs,
+			    __attribute__((unused)) void *arg)
+{
+	struct bfd_session_data *bsd = bs->bs_data;
+
+	events_ctx_del_timer(bsd->bsd_ec, &bsd->bsd_rxev);
+}
+
+static void
+bfd_session_state_change(struct bfd_session *bs,
+			 __attribute__((unused)) void *arg,
+			 enum bfd_state_value ostate,
+			 enum bfd_state_value nstate)
+{
+	struct bfd_session_data *bsd = bs->bs_data;
+
+	if (nstate == STATE_UP)
+		bsd->bsd_up_count++;
+	else if (ostate == STATE_UP)
+		bsd->bsd_down_count++;
+
+	bfd_session_debug(bs, "State changed %s -> %s",
+			  bfd_session_get_state_string(ostate),
+			  bfd_session_get_state_string(nstate));
+	bfd_session_dump(bs);
+}
+
 
 /*
  * Public API.
@@ -199,37 +371,53 @@ close_and_return:
 void
 bfd_session_init(void)
 {
-	RBT_INIT(bsessionst, &bsessionst);
-}
+	struct bfddp_callbacks bfddp_callbacks = {
+		.bc_session_new = bfd_session_new,
+		.bc_session_update = bfd_session_update,
+		.bc_session_free = bfd_session_free,
+		.bc_tx_control = bfd_tx_control_cb,
+		.bc_tx_control_update = bfd_session_update_control_tx,
+		.bc_tx_control_stop = bfd_session_stop_control_tx,
+		.bc_rx_control_update = bfd_session_update_control_rx,
+		.bc_rx_control_stop = bfd_session_stop_control_rx,
+		.bc_state_change = bfd_session_state_change,
+	};
 
-static void
-bfd_session_free(struct bfd_session *bs)
-{
-	RBT_REMOVE(bsessionst, &bsessionst, bs);
-	events_ctx_del_fd(bs->bs_ec, bs->bs_sock);
-	events_ctx_del_timer(bs->bs_ec, &bs->bs_rxev);
-	events_ctx_del_timer(bs->bs_ec, &bs->bs_txev);
-	close(bs->bs_sock);
-	free(bs);
+	/* Register our callbacks. */
+	bfddp_initialize(&bfddp_callbacks);
+
+	/* Initialize our session data structure. */
+	RBT_INIT(bsessionst, &bsessionst);
 }
 
 void
 bfd_session_finish(void)
 {
+	struct bfd_session_data *bsd;
 	struct bfd_session *bs;
 
-	while ((bs = RBT_MIN(bsessionst, &bsessionst)) != NULL)
-		bfd_session_free(bs);
+	/* Free all memory. */
+	while ((bsd = RBT_MIN(bsessionst, &bsessionst)) != NULL) {
+		bs = bsd->bsd_bs;
+		bfddp_session_free(&bs, NULL);
+	}
 }
 
 struct bfd_session *
 bfd_session_lookup(uint32_t lid)
 {
-	struct bfd_session bsk;
+	struct bfd_session_data *bsd;
+	struct bfd_session_data bsdk;
+	struct bfd_session bs;
 
-	bsk.bs_lid = lid;
+	bsdk.bsd_bs = &bs;
+	bs.bs_lid = lid;
 
-	return RBT_FIND(bsessionst, &bsessionst, &bsk);
+	bsd = RBT_FIND(bsessionst, &bsessionst, &bsdk);
+	if (bsd == NULL)
+		return NULL;
+
+	return bsd->bsd_bs;
 }
 
 struct bfd_session *
@@ -237,9 +425,10 @@ bfd_session_lookup_by_packet(const struct bfd_packet_metadata *bpm)
 {
 	struct sockaddr_in *sin;
 	struct bfd_session *bs;
+	struct bfd_session_data *bsd;
 
-	RBT_FOREACH(bs, bsessionst, &bsessionst)
-	{
+	RBT_FOREACH(bsd, bsessionst, &bsessionst) {
+		bs = bsd->bsd_bs;
 		/* Filter by interface (if set). */
 		if (bs->bs_ifindex && bs->bs_ifindex != bpm->bpm_ifindex)
 			continue;
@@ -274,446 +463,6 @@ bfd_session_lookup_by_packet(const struct bfd_packet_metadata *bpm)
 	}
 
 	return bs;
-}
-
-void
-bfd_session_update(struct bfd_session *bs, const struct bfddp_session *bdps)
-{
-	struct in_addr *ia;
-	uint16_t port;
-
-	/*
-	 * Load flags.
-	 *
-	 * NOTE: normalize boolean values (e.g. `!!`) so packet build functions
-	 * can use it with shift (e.g. (multihop << X)).
-	 */
-	bs->bs_multihop = !!(bdps->flags & SESSION_MULTIHOP);
-	bs->bs_passive = !!(bdps->flags & SESSION_PASSIVE);
-	bs->bs_demand = !!(bdps->flags & SESSION_DEMAND);
-	bs->bs_cbit = !!(bdps->flags & SESSION_CBIT);
-	bs->bs_echo = !!(bdps->flags & SESSION_ECHO);
-
-	if (bs->bs_multihop)
-		port = htons(BFD_MULTI_HOP_PORT);
-	else
-		port = htons(BFD_SINGLE_HOP_PORT);
-
-	/* Load addresses. */
-	bs->bs_ipv4 = !(bdps->flags & SESSION_IPV6);
-	if (bs->bs_ipv4) {
-		ia = (struct in_addr *)&bdps->src;
-		bs->bs_src.bs_src_sin.sin_family = AF_INET;
-		bs->bs_src.bs_src_sin.sin_addr.s_addr = ia->s_addr;
-
-		ia = (struct in_addr *)&bdps->dst;
-		bs->bs_dst.bs_dst_sin.sin_family = AF_INET;
-		bs->bs_dst.bs_dst_sin.sin_addr.s_addr = ia->s_addr;
-		bs->bs_dst.bs_dst_sin.sin_port = port;
-	} else {
-		bs->bs_src.bs_src_sin6.sin6_family = AF_INET6;
-		memcpy(&bs->bs_src.bs_src_sin6.sin6_addr, &bdps->src,
-		       sizeof(struct in6_addr));
-		if (IN6_IS_ADDR_LINKLOCAL(&bs->bs_src.bs_src_sin6.sin6_addr))
-			bs->bs_src.bs_src_sin6.sin6_scope_id = bdps->ifindex;
-
-		bs->bs_dst.bs_dst_sin6.sin6_family = AF_INET6;
-		memcpy(&bs->bs_dst.bs_dst_sin6.sin6_addr, &bdps->dst,
-		       sizeof(struct in6_addr));
-		bs->bs_dst.bs_dst_sin6.sin6_port = port;
-		if (IN6_IS_ADDR_LINKLOCAL(&bs->bs_dst.bs_dst_sin6.sin6_addr))
-			bs->bs_dst.bs_dst_sin6.sin6_scope_id = bdps->ifindex;
-	}
-
-	/* Load timers. */
-	bs->bs_tx = ntohl(bdps->min_tx);
-	bs->bs_rx = ntohl(bdps->min_rx);
-	bs->bs_erx = ntohl(bdps->min_echo_rx);
-	bs->bs_hold = ntohl(bdps->hold_time);
-	bs->bs_dmultiplier = bdps->detect_mult;
-
-	bs->bs_minttl = bdps->ttl;
-	bs->bs_ifindex = ntohl(bdps->ifindex);
-	if (bdps->ifname[0])
-		snprintf(bs->bs_ifname, sizeof(bs->bs_ifname), "%s",
-			 bdps->ifname);
-
-	/* Create socket only if not open or configuration changed. */
-	if (bs->bs_sock != -1) {
-		bfd_session_debug(bs, "update session");
-		bfd_session_dump(bs);
-		return;
-	}
-
-	bfd_session_debug(bs, "new session");
-	bfd_session_dump(bs);
-
-	bs->bs_sock = bfd_socket(&bs->bs_src.bs_src_sa);
-
-	/* Start transmission if not passive mode. */
-	bfd_session_update_control_tx(bs);
-}
-
-static void
-bfd_session_set_slowstart(struct bfd_session *bs)
-{
-	/* Slow start settings. */
-	bs->bs_cur_dmultiplier = SLOWSTART_DMULT;
-	bs->bs_cur_tx = SLOWSTART_TX;
-	bs->bs_cur_rx = SLOWSTART_RX;
-	bs->bs_cur_erx = SLOWSTART_ERX;
-}
-
-static void
-bfd_session_reset_remote(struct bfd_session *bs)
-{
-	/* Default remote settings. */
-	bs->bs_rdmultiplier = SLOWSTART_DMULT;
-	bs->bs_rtx = SLOWSTART_TX;
-	bs->bs_rrx = SLOWSTART_RX;
-	bs->bs_rerx = SLOWSTART_ERX;
-}
-
-struct bfd_session *
-bfd_session_new(struct events_ctx *ec, struct bfddp_ctx *bctx,
-		const struct bfddp_session *bdps)
-{
-	struct bfd_session *bs;
-
-	/* Look up session first. */
-	bs = bfd_session_lookup(ntohl(bdps->lid));
-	if (bs != NULL) {
-		bfd_session_update(bs, bdps);
-		return bs;
-	}
-
-	/* Create if it doesn't exist. */
-	bs = calloc(1, sizeof(*bs));
-	if (bs == NULL)
-		return NULL;
-
-	/* Copy important pointers. */
-	bs->bs_ec = ec;
-	bs->bs_bctx = bctx;
-
-	/* Set file descriptor to invalid value. */
-	bs->bs_sock = -1;
-
-	/* Local settings. */
-	bs->bs_lid = ntohl(bdps->lid);
-	bs->bs_state = STATE_DOWN;
-	bfd_session_set_slowstart(bs);
-
-	/* Remote settings. */
-	bs->bs_rstate = STATE_DOWN;
-	bfd_session_reset_remote(bs);
-
-	bfd_session_update(bs, bdps);
-
-	RBT_INSERT(bsessionst, &bsessionst, bs);
-
-	return bs;
-}
-
-void
-bfd_session_delete(const struct bfddp_session *bdps)
-{
-	struct bfd_session *bs;
-
-	bs = bfd_session_lookup(ntohl(bdps->lid));
-	if (bs == NULL) {
-		slog("%s: failed to find session %u", __func__,
-		     ntohl(bdps->lid));
-		return;
-	}
-
-	/* Remove all timers. */
-	events_ctx_del_timer(bs->bs_ec, &bs->bs_rxev);
-	events_ctx_del_timer(bs->bs_ec, &bs->bs_txev);
-
-	/* Remove from data structures. */
-	RBT_REMOVE(bsessionst, &bsessionst, bs);
-
-	/* Close socket. */
-	if (bs->bs_sock >= 0)
-		close(bs->bs_sock);
-
-	/* Free remaining memory. */
-	free(bs);
-}
-
-static void
-bfd_session_sm_admindown(__attribute__((unused)) struct bfd_session *bs,
-			 __attribute__((unused)) enum bfd_state_value nstate)
-{
-	/* NOTHING. */
-}
-
-static void
-bfd_session_sm_down(struct bfd_session *bs, enum bfd_state_value nstate)
-{
-	switch (nstate) {
-	case STATE_ADMINDOWN:
-		/* NOTHING. */
-		break;
-	case STATE_DOWN:
-		bfd_session_set_state(bs, STATE_INIT);
-
-		/* Notify state change. */
-		bfddp_send_session_state_change(bs);
-		break;
-	case STATE_INIT:
-		bfd_session_set_state(bs, STATE_UP);
-
-		/* Start polling. */
-		bs->bs_poll = true;
-
-		/* Immediately inform the peer */
-		bfd_send_control_packet(bs);
-
-		/* Notify state change. */
-		bfddp_send_session_state_change(bs);
-		break;
-	case STATE_UP:
-		/* NOTHING: we haven't and the peer hasn't sent INIT yet. */
-		break;
-	}
-}
-
-static void
-bfd_session_sm_init(struct bfd_session *bs, enum bfd_state_value nstate)
-{
-	switch (nstate) {
-	case STATE_ADMINDOWN:
-		bfd_session_set_state(bs, STATE_DOWN);
-
-		/* Notify state change. */
-		bfddp_send_session_state_change(bs);
-		break;
-	case STATE_DOWN:
-		/* We are waiting peer's INIT. */
-		break;
-	case STATE_INIT:
-		/* FALLTHROUGH. */
-	case STATE_UP:
-		bfd_session_set_state(bs, STATE_UP);
-		bs->bs_diag = 0;
-
-		/* Start polling. */
-		bs->bs_poll = true;
-
-		/* Immediately inform the peer */
-		bfd_send_control_packet(bs);
-
-		/* Notify state change. */
-		bfddp_send_session_state_change(bs);
-		break;
-	}
-}
-
-static void
-bfd_session_sm_up(struct bfd_session *bs, enum bfd_state_value nstate)
-{
-	switch (nstate) {
-	case STATE_ADMINDOWN:
-		/* FALLTHROUGH. */
-	case STATE_DOWN:
-		bfd_session_set_state(bs, STATE_DOWN);
-
-		bfd_session_set_slowstart(bs);
-		/* Disable echo timers. */
-
-		/* Notify state change. */
-		bfddp_send_session_state_change(bs);
-		break;
-	case STATE_INIT:
-		/* FALLTHROUGH. */
-	case STATE_UP:
-		/* NOTHING. */
-		break;
-	}
-}
-
-void
-bfd_session_state_machine(struct bfd_session *bs, enum bfd_state_value nstate)
-{
-	switch (bs->bs_state) {
-	case STATE_ADMINDOWN:
-		bfd_session_sm_admindown(bs, nstate);
-		break;
-	case STATE_DOWN:
-		bfd_session_sm_down(bs, nstate);
-		break;
-	case STATE_INIT:
-		bfd_session_sm_init(bs, nstate);
-		break;
-	case STATE_UP:
-		bfd_session_sm_up(bs, nstate);
-		break;
-	}
-}
-
-static uint32_t
-apply_jitter(uint32_t total, bool dm_one)
-{
-	uint32_t jitter;
-
-	if (dm_one)
-		jitter = (uint32_t)(random() % 11);
-	else
-		jitter = (uint32_t)(random() % 26);
-
-	return total - (total * (jitter / 100));
-}
-
-static uint32_t
-bfd_session_next_control_tx(struct bfd_session *bs)
-{
-	uint32_t selected_timer;
-
-	/*
-	 * RFC 5880 Section 6.8.7. Transmitting BFD Control Packets:
-	 * Select the larger of 'Desired Transmission' and 'Remote Min Recv.'.
-	 */
-	if (bs->bs_cur_tx > bs->bs_rrx)
-		selected_timer = bs->bs_cur_tx;
-	else
-		selected_timer = bs->bs_rrx;
-
-	return apply_jitter(selected_timer, bs->bs_rdmultiplier == 1);
-}
-
-static int64_t
-bfd_session_control_tx_timeout(__attribute__((unused)) struct events_ctx *ec,
-			       void *arg)
-{
-	/* Send again. */
-	bfd_send_control_packet(arg);
-
-	/* Reschedule timer. */
-	return bfd_session_next_control_tx(arg) / 1000;
-}
-
-static int64_t
-bfd_session_control_rx_timeout(__attribute__((unused)) struct events_ctx *ec,
-			       void *arg)
-{
-	struct bfd_session *bs = arg;
-	enum bfd_state_value pstate = bs->bs_state;
-
-	bfd_session_debug(bs, "control packet receive timeout");
-
-	bfd_session_reset_remote(bs);
-
-	/* Tell FRR's BFD daemon the session is down. */
-	bfd_session_set_state(bs, STATE_DOWN);
-	bs->bs_diag = bs->bs_rdiag = DIAG_CONTROL_EXPIRED;
-	bs->bs_rid = 0;
-	bfd_session_set_slowstart(bs);
-
-	/*
-	 * Only send notification if state changed.
-	 *
-	 * This prevents a extra notification in case the remote peer
-	 * asked and ceased to send control packets earlier than expiration
-	 * timer.
-	 */
-	if (bs->bs_state != pstate)
-		bfddp_send_session_state_change(bs);
-
-	/* Remove the timer pointer since we'll get rid of it. */
-	bs->bs_rxev = NULL;
-
-	/* Get rid of this timer. */
-	return -1;
-}
-
-void
-bfd_session_update_control_tx(struct bfd_session *bs)
-{
-	bfd_send_control_packet(bs);
-
-	if (bs->bs_txev)
-		bs->bs_txev = events_ctx_update_timer(
-			bs->bs_ec, bs->bs_txev,
-			bfd_session_next_control_tx(bs) / 1000,
-			bfd_session_control_tx_timeout, bs);
-	else
-		bs->bs_txev = events_ctx_add_timer(
-			bs->bs_ec, bfd_session_next_control_tx(bs) / 1000,
-			bfd_session_control_tx_timeout, bs);
-}
-
-void
-bfd_session_update_control_rx(struct bfd_session *bs)
-{
-	uint32_t next_to;
-
-	/*
-	 * RFC 5880 Section 6.8.4. Calculating the Detection Time:
-	 *
-	 * > In Asynchronous mode, the Detection Time calculated in the local
-	 * > system is equal to the value of Detect Mult received from the
-	 * > remote system, multiplied by the agreed transmit interval of the
-	 * > remote system (the greater of bfd.RequiredMinRxInterval and the
-	 * > last received Desired Min TX Interval). The Detect Mult value is
-	 * > (roughly speaking, due to jitter) the number of packets that have
-	 * > to be missed in a row to declare the session to be down.
-	 */
-	if ((bs->bs_cur_rx > bs->bs_rtx) || (bs->bs_poll))
-		next_to = bs->bs_cur_rx * bs->bs_rdmultiplier;
-	else
-		next_to = bs->bs_rtx * bs->bs_rdmultiplier;
-
-	if (bs->bs_rxev)
-		bs->bs_rxev = events_ctx_update_timer(
-			bs->bs_ec, bs->bs_rxev, next_to / 1000,
-			bfd_session_control_rx_timeout, bs);
-	else
-		bs->bs_rxev = events_ctx_add_timer(
-			bs->bs_ec, next_to / 1000,
-			bfd_session_control_rx_timeout, bs);
-}
-
-void
-bfd_session_final_event(struct bfd_session *bs)
-{
-	/* Negotiation ended, apply new intervals. */
-	bs->bs_cur_dmultiplier = bs->bs_dmultiplier;
-	bs->bs_cur_tx = bs->bs_tx;
-	bs->bs_cur_rx = bs->bs_rx;
-	bs->bs_cur_erx = bs->bs_erx;
-
-	bfd_session_update_control_rx(bs);
-	bfd_session_update_control_tx(bs);
-
-	/* Send updated timers to control plane. */
-	bfddp_send_session_state_change(bs);
-
-	bfd_session_debug(bs, "final event");
-	bfd_session_dump(bs);
-}
-
-void
-bfd_session_set_state(struct bfd_session *bs, enum bfd_state_value state)
-{
-	if ((state >= STATE_ADMINDOWN) && (state <= STATE_UP)) {
-		if ((state == STATE_UP) && (bs->bs_state != STATE_UP)) {
-			bs->bs_up_count++;
-		} else if (((state == STATE_DOWN) || (state == STATE_ADMINDOWN))
-			   && (bs->bs_state != STATE_DOWN)
-			   && (bs->bs_state != STATE_ADMINDOWN)) {
-			bs->bs_down_count++;
-		}
-
-		bfd_session_debug(bs, "State changed %s -> %s",
-				  bfd_session_get_state_string(bs->bs_state),
-				  bfd_session_get_state_string(state));
-		bs->bs_state = state;
-
-	} else {
-		bfd_session_debug(bs, "Unknown state value '%d'", state);
-	}
 }
 
 uint32_t

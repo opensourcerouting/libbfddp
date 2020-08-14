@@ -42,79 +42,6 @@
 /* Error statistics */
 static struct bfd_error_statistics error_stats;
 
-static uint64_t
-hu64tonu64(uint64_t value)
-{
-	union {
-		uint32_t v32[2];
-		uint64_t v64;
-	} vu, *vp;
-
-	vp = (void *)&value;
-	vu.v32[0] = htonl(vp->v32[1]);
-	vu.v32[1] = htonl(vp->v32[0]);
-
-	return vu.v64;
-}
-
-static uint64_t
-nu64tohu64(uint64_t value)
-{
-	union {
-		uint32_t v32[2];
-		uint64_t v64;
-	} vu, *vp;
-
-	vp = (void *)&value;
-	vu.v32[0] = ntohl(vp->v32[1]);
-	vu.v32[1] = ntohl(vp->v32[0]);
-
-	return vu.v64;
-}
-
-void
-bfddp_send_echo_request(struct bfddp_ctx *bctx)
-{
-	struct bfddp_message msg = {};
-	struct timeval tv;
-
-	/* Prepare header. */
-	msg.header.version = BFD_DP_VERSION;
-	msg.header.length = htons(sizeof(struct bfddp_message_header) +
-		sizeof(struct bfddp_echo));
-	msg.header.type = htons(ECHO_REQUEST);
-
-	/* Payload data. */
-	gettimeofday(&tv, NULL);
-	msg.data.echo.dp_time =
-		hu64tonu64((uint64_t)((tv.tv_sec * 1000000) + tv.tv_usec));
-
-	if (bfddp_write_enqueue(bctx, &msg) == 0)
-		errx(1, "%s: bfddp_write_enqueue failed", __func__);
-}
-
-void
-bfddp_send_echo_reply(struct bfddp_ctx *bctx, uint64_t bfdd_time)
-{
-	struct bfddp_message msg = {};
-	struct timeval tv;
-
-	/* Prepare header. */
-	msg.header.version = BFD_DP_VERSION;
-	msg.header.length = htons(sizeof(struct bfddp_message_header) +
-		sizeof(struct bfddp_echo));
-	msg.header.type = htons(ECHO_REPLY);
-
-	/* Payload data. */
-	gettimeofday(&tv, NULL);
-	msg.data.echo.dp_time =
-		hu64tonu64((uint64_t)((tv.tv_sec * 1000000) + tv.tv_usec));
-	msg.data.echo.bfdd_time = bfdd_time;
-
-	if (bfddp_write_enqueue(bctx, &msg) == 0)
-		errx(1, "%s: bfddp_write_enqueue failed", __func__);
-}
-
 void
 bfddp_process_echo_time(const struct bfddp_echo *echo)
 {
@@ -136,144 +63,29 @@ bfddp_process_echo_time(const struct bfddp_echo *echo)
 	       bfdt - dpt, dpt_total - dpt);
 }
 
-void
-bfddp_send_session_state_change(const struct bfd_session *bs)
-{
-	struct bfddp_message msg = {};
-
-	/* Prepare header. */
-	msg.header.version = BFD_DP_VERSION;
-	msg.header.length = htons(sizeof(msg.header) + sizeof(msg.data.state));
-	msg.header.type = htons(BFD_STATE_CHANGE);
-
-	/* Prepare payload. */
-	msg.data.state.lid = htonl(bs->bs_lid);
-	msg.data.state.rid = htonl(bs->bs_rid);
-	msg.data.state.state = (uint8_t)bs->bs_state;
-	msg.data.state.diagnostics = (uint8_t)bs->bs_rdiag;
-	msg.data.state.detection_multiplier = bs->bs_rdmultiplier;
-	msg.data.state.desired_tx = htonl(bs->bs_rtx);
-	msg.data.state.required_rx = htonl(bs->bs_rrx);
-	msg.data.state.required_echo_rx = htonl(bs->bs_rerx);
-
-	if (bs->bs_rcbit)
-		msg.data.state.remote_flags |= RBIT_CPI;
-	if (bs->bs_rdemand)
-		msg.data.state.remote_flags |= RBIT_DEMAND;
-
-	msg.data.state.remote_flags = htonl(msg.data.state.remote_flags);
-
-	if (bfddp_write_enqueue(bs->bs_bctx, &msg) == 0) {
-		plog("state change enqueue failed");
-	}
-}
-
-int
-bfd_session_reply_counters(struct bfddp_ctx *bctx,
-			   const struct bfddp_message *msg)
-{
-	struct bfddp_message rmsg = {};
-	struct bfd_session *bs =
-		bfd_session_lookup(ntohl(msg->data.counters_req.lid));
-	uint16_t msglen =
-		sizeof(rmsg.header) + sizeof(rmsg.data.session_counters);
-
-	/* Fill in message header. */
-	rmsg.header.version = BFD_DP_VERSION;
-	rmsg.header.length = htons(msglen);
-	rmsg.header.type = htons(BFD_SESSION_COUNTERS);
-	rmsg.header.id = msg->header.id;
-
-	/* Copy ID as is. */
-	rmsg.data.counters_req.lid = msg->data.counters_req.lid;
-
-	/* Failed to find session. */
-	if (bs == NULL) {
-		slog("%s: failed to find session", __func__);
-
-		/* Send answer anyway so it doesn't wait forever. */
-		bfddp_write_enqueue(bctx, &rmsg);
-		return -1;
-	}
-
-	/* Fill payload. */
-	rmsg.data.session_counters.control_input_bytes =
-		hu64tonu64(bs->bs_crx_bytes);
-	rmsg.data.session_counters.control_input_packets =
-		hu64tonu64(bs->bs_crx_packets);
-	rmsg.data.session_counters.control_output_bytes =
-		hu64tonu64(bs->bs_ctx_bytes);
-	rmsg.data.session_counters.control_output_packets =
-		hu64tonu64(bs->bs_ctx_packets);
-
-	if (bfddp_write_enqueue(bs->bs_bctx, &rmsg) == 0)
-		return -1;
-
-	return 0;
-}
-
 /*
  * BFD Protocol.
  */
-void
-bfd_send_control_packet(struct bfd_session *bs)
+ssize_t
+bfd_tx_control_cb(struct bfd_session *bs, __attribute__((unused)) void *arg,
+		  const struct bfddp_control_packet *bcp)
 {
-	struct bfddp_control_packet cp = {};
+	struct bfd_session_data *bsd = bs->bs_data;
 	socklen_t salen;
-	bool poll = bs->bs_poll;
-	uint8_t state = bs->bs_state & 0x03;
 	ssize_t rv;
-
-	/* Sanity check: don't allow POLL and FINAL in the same packet. */
-	if (bs->bs_poll && bs->bs_final) {
-		plog("POLL and FINAL enabled at the same time");
-		poll = false;
-	}
-
-	cp.version_diag = (uint8_t)((1 << 5) | (bs->bs_diag & 0x1F));
-	cp.state_bits =
-		(uint8_t)((state << 6u)		  /* Current state. */
-			  | (poll << 5u)	  /* Poll bit */
-			  | (bs->bs_final << 4u)  /* Final bit */
-			  | (bs->bs_cbit << 3u)	  /* Control Plane I. bit */
-			  | (0 << 2u)		  /* Authentication bit. */
-			  | (bs->bs_demand << 1u) /* Demand mode bit */
-			  | (0 << 0u));		  /* Multi point bit. */
-
-	cp.detection_multiplier = bs->bs_dmultiplier;
-	cp.length = sizeof(cp);
-	cp.local_id = htonl(bs->bs_lid);
-	cp.remote_id = htonl(bs->bs_rid);
-
-	switch (bs->bs_state) {
-	case STATE_ADMINDOWN:
-	case STATE_DOWN:
-		cp.desired_tx = htonl(bs->bs_cur_tx);
-		cp.required_rx = htonl(bs->bs_cur_rx);
-		cp.required_echo_rx = htonl(bs->bs_cur_erx);
-		break;
-	case STATE_INIT:
-	case STATE_UP:
-		cp.desired_tx = htonl(bs->bs_tx);
-		cp.required_rx = htonl(bs->bs_rx);
-		cp.required_echo_rx = htonl(bs->bs_erx);
-		break;
-	}
 
 	if (bs->bs_dst.bs_dst_sa.sa_family == AF_INET)
 		salen = sizeof(struct sockaddr_in);
 	else
 		salen = sizeof(struct sockaddr_in6);
 
-	rv = sendto(bs->bs_sock, &cp, cp.length, 0, &bs->bs_dst.bs_dst_sa,
+	rv = sendto(bsd->bsd_sock, bcp, bcp->length, 0, &bs->bs_dst.bs_dst_sa,
 		    salen);
 	if (rv <= 0) {
 		plog("sendto failed: %s", strerror(errno));
 	}
 
-	/* Update session output data. */
-	bs->bs_ctx_bytes += (size_t)rv;
-	bs->bs_ctx_packets++;
+	return rv;
 }
 
 static void
@@ -451,62 +263,53 @@ bfd_recv_control_packet(int sock)
 {
 	struct bfddp_control_packet *bcp;
 	struct bfd_session *bs;
-	enum bfd_state_value state;
 	int plen;
-	bool timers_changed = false;
+	enum bfddp_packet_validation bpv;
 	struct bfd_packet_metadata bpm = {};
-	uint8_t version;
 
 	plen = bfd_recv_packet(sock, &bpm);
-	/* Assert we have the received the whole packet. */
-	if (plen < (int)sizeof(*bcp)) {
-		plog("packet read is too small (%d < %zu)", plen, sizeof(*bcp));
+	/* Handle failures. */
+	if (plen <= 0)
 		return;
-	}
 
 	bcp = (struct bfddp_control_packet *)bpm.bpm_data;
-	/* Check packet header length. */
-	if (bcp->length < sizeof(*bcp) || bcp->length > plen) {
-		plog("invalid packet header length (%d)", plen);
+	bpv = bfddp_session_validate_packet(bcp, (size_t)plen);
+	switch (bpv) {
+	case BPV_INVALID_LENGTH:
+		/* FALLTHROUGH */
+	case BPV_PACKET_TOO_SMALL:
 		error_stats.invalid_len_drops++;
 		return;
-	}
-
-	/* Invalid version. */
-	version = (bcp->version_diag >> 5) & 0x07;
-	if (version != BFD_PROTOCOL_VERSION) {
-		plog("invalid BFD protocol version (%d)", version);
+	case BPV_INVALID_VERSION:
 		error_stats.version_drops++;
 		return;
-	}
-
-	/* Invalid detection multiplier. */
-	if (bcp->detection_multiplier == 0) {
-		plog("invalid packet detection multiplier (%d)",
-		     bcp->detection_multiplier);
+	case BPV_ZERO_MULTIPLIER:
 		error_stats.multiplier_drops++;
 		return;
+	case BPV_ZERO_LOCAL_ID:
+		error_stats.my_disc_drops++;
+		return;
+	case BPV_INVALID_REMOTE_ID:
+		return;
+
+	case BPV_OK:
+		/* Packet is valid, proceed. */
+		break;
 	}
 
 	/* Discard multi point packets. */
 	if (bcp->state_bits & (STATE_MULTI_BIT)) {
-		plog("multi point not implemented");
 		error_stats.multi_point_drops++;
 		return;
 	}
 
-	/* Discard sessions using ID zero. */
-	if (bcp->local_id == 0) {
-		plog("remote session is using ID zero");
-		error_stats.my_disc_drops++;
+	/* Alert about unsupported modes. */
+	if (bcp->state_bits & STATE_AUTH_BIT) {
+		plog("unsupported authentication mode");
 		return;
 	}
-
-	state = (bcp->state_bits >> 6);
-	/* Invalid remote ID with established session. */
-	if ((state == STATE_INIT || state == STATE_UP) && bcp->remote_id == 0) {
-		plog("remote peer sent bad local session id");
-		error_stats.invalid_session_drops++;
+	if (bcp->state_bits & STATE_DEMAND_BIT) {
+		plog("unsupported demand mode");
 		return;
 	}
 
@@ -540,84 +343,5 @@ bfd_recv_control_packet(int sock)
 		}
 	}
 
-	/* Update session input data. */
-	bs->bs_crx_bytes += bpm.bpm_datalen;
-	bs->bs_crx_packets++;
-
-	/* Alert about unsupported modes. */
-	if (bcp->state_bits & STATE_AUTH_BIT) {
-		plog("unsupported authentication mode");
-		return;
-	}
-	if (bcp->state_bits & STATE_DEMAND_BIT) {
-		plog("unsupported demand mode");
-		return;
-	}
-
-	/* Copy remote system status. */
-	bs->bs_rstate = state;
-	bs->bs_rdiag = bcp->version_diag & 0x1F;
-	bs->bs_rid = ntohl(bcp->local_id);
-
-	/* Detect timers change: */
-	if (ntohl(bcp->desired_tx) != bs->bs_rtx)
-		timers_changed = true;
-	else if (ntohl(bcp->required_rx) != bs->bs_rrx)
-		timers_changed = true;
-	else if (ntohl(bcp->required_echo_rx) != bs->bs_rerx)
-		timers_changed = true;
-	else if (bcp->detection_multiplier != bs->bs_rdmultiplier)
-		timers_changed = true;
-
-	bs->bs_rtx = ntohl(bcp->desired_tx);
-	bs->bs_rrx = ntohl(bcp->required_rx);
-	bs->bs_rerx = ntohl(bcp->required_echo_rx);
-	bs->bs_rdmultiplier = bcp->detection_multiplier;
-	bs->bs_rcbit = !!(bcp->state_bits & STATE_CPI_BIT);
-	bs->bs_rdemand = !!(bcp->state_bits & STATE_DEMAND_BIT);
-
-	/*
-	 * RFC 5880 Section 6.8.6. Reception of BFD Control Packets:
-	 *
-	 * > If a Poll Sequence is being transmitted by the local system
-	 * > and the Final (F) bit in the received packet is set, the
-	 * > Poll Sequence MUST be terminated.
-	 */
-	if (bs->bs_poll && (bcp->state_bits & STATE_FINAL_BIT)) {
-		bs->bs_poll = false;
-		bs->bs_final = false;
-		bfd_session_final_event(bs);
-	} else {
-		/*
-		 * Notify control plane about new timers if this is not the
-		 * final event.
-		 */
-		if (timers_changed)
-			bfddp_send_session_state_change(bs);
-	}
-
-	/*
-	 * RFC 5880 Section 6.8.6. Reception of BFD Control Packets:
-	 *
-	 * > If the Poll (P) bit is set, send a BFD Control packet to the
-	 * > remote system with the Poll (P) bit clear, and the Final (F)
-	 * >  bit set (see section 6.8.7).
-	 */
-	if (bcp->state_bits & STATE_POLL_BIT) {
-		bs->bs_poll = false;
-		bs->bs_final = true;
-
-		/* Speed up session convergence. */
-		bfd_send_control_packet(bs);
-
-		bs->bs_final = false;
-	}
-
-	/* Run the state machine. */
-	bfd_session_state_machine(bs, bs->bs_rstate);
-
-	/* We received the peer packet, update the expiration timer. */
-	bfd_session_update_control_rx(bs);
-
-	/* Handle echo timer not implemented. */
+	bfddp_session_rx_packet(bs, NULL, bcp);
 }

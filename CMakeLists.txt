@@ -5,6 +5,7 @@ project(bfddp VERSION 0.1.0)
 add_library(
   libbfddp
   libbfddp/bfddp.c
+  libbfddp/bfddp_extra.c
   )
 
 add_executable(

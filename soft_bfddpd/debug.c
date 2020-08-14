@@ -28,8 +28,6 @@
 #include <stdarg.h>
 #include <stdio.h>
 
-#include "bfddp.h"
-#include "bfddp_packet.h"
 #include "bfddpd.h"
 
 static const char *bfd_session_states[] = {
