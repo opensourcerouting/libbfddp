@@ -64,7 +64,8 @@ static void bfddp_handle_message(struct events_ctx *ec, struct bfddp_ctx *bctx);
 /**
  * Handle common read/write events.
  */
-static int bfddp_event(struct events_ctx *ec, int fd, short revents, void *arg);
+static void bfddp_event(struct events_ctx *ec, int fd, short revents,
+			void *arg);
 
 /*
  * Helper functions.
@@ -247,11 +248,11 @@ main(int argc, char *argv[])
 }
 
 /* Forward declaration. */
-static int bfddp_connect_event(struct events_ctx *ec, int fd, short revents,
-			       void *arg);
+static void bfddp_connect_event(struct events_ctx *ec, int fd, short revents,
+			        void *arg);
 static int bfd_single_hop_socket(void);
-static int bfd_single_hop_recv(struct events_ctx *ec, int sock, short revents,
-			       void *arg);
+static void bfd_single_hop_recv(struct events_ctx *ec, int sock, short revents,
+			        void *arg);
 
 static void __attribute__((noreturn))
 bfddp_main(const struct sockaddr *sa, socklen_t salen)
@@ -315,7 +316,7 @@ bfddp_main(const struct sockaddr *sa, socklen_t salen)
 	exit(0);
 }
 
-static int
+static void
 bfddp_connect_event(struct events_ctx *ec, int fd, short revents, void *arg)
 {
 	int rv;
@@ -329,16 +330,16 @@ bfddp_connect_event(struct events_ctx *ec, int fd, short revents, void *arg)
 	if (rv == -1)
 		err(1, "%s: bfddp_is_connected", __func__);
 	/* Handle interruptions: ask for more writes. */
-	if (rv == 1)
-		return POLLOUT;
+	if (rv == 1) {
+		events_ctx_add_fd(ec, fd, POLLOUT, bfddp_connect_event, arg);
+		return;
+	}
 
 	/* Ask for echo. */
 	bfddp_send_echo_request(arg);
 
 	/* Add our descriptor for read/write with new callback. */
 	events_ctx_add_fd(ec, fd, POLLIN | POLLOUT, bfddp_event, arg);
-
-	return POLLIN | POLLOUT;
 }
 
 static void
@@ -388,7 +389,7 @@ bfddp_read_event(struct events_ctx *ec, struct bfddp_ctx *bctx)
 	bfddp_handle_message(ec, bctx);
 }
 
-static int
+static void
 bfddp_event(struct events_ctx *ec, __attribute__((unused)) int fd,
 	    short revents, void *arg)
 {
@@ -406,7 +407,7 @@ bfddp_event(struct events_ctx *ec, __attribute__((unused)) int fd,
 	if (bfddp_write_pending(arg))
 		events |= POLLOUT;
 
-	return events;
+	events_ctx_add_fd(ec, fd, events, bfddp_event, arg);
 }
 
 static void __attribute__((noreturn))
@@ -419,19 +420,16 @@ bfddp_terminate(struct bfddp_ctx *bctx)
 	exit(0);
 }
 
-static int64_t
-bfddp_echo_request_event(struct events_ctx *ec, void *arg)
+static void
+bfddp_echo_request_event(__attribute__((unused)) struct events_ctx *ec,
+			 void *arg)
 {
-	struct bfddp_ctx *bctx = arg;
-
 	/* Enqueue echo request. */
-	bfddp_send_echo_request(bctx);
+	bfddp_send_echo_request(arg);
 
-	/* Ask for POLLOUT. */
-	events_ctx_add_fd(ec, bfddp_get_fd(bctx), POLLIN | POLLOUT, bfddp_event,
-			  bctx);
-
-	return -1;
+	/* Ask to send the echo request. */
+	events_ctx_add_fd(ec, bfddp_get_fd(arg), POLLIN | POLLOUT, bfddp_event,
+			  arg);
 }
 
 static void
@@ -492,7 +490,7 @@ bfddp_handle_message(struct events_ctx *ec, struct bfddp_ctx *bctx)
 	bfddp_read_finish(bctx);
 }
 
-static int
+static void
 bfd_single_hop_recv(__attribute__((unused)) struct events_ctx *ec, int sock,
 		    short revents, __attribute__((unused)) void *arg)
 {
@@ -503,7 +501,7 @@ bfd_single_hop_recv(__attribute__((unused)) struct events_ctx *ec, int sock,
 	bfd_recv_control_packet(sock);
 
 	/* Always read more. */
-	return POLLIN;
+	events_ctx_add_fd(ec, sock, POLLIN, bfd_single_hop_recv, NULL);
 }
 
 static int

@@ -251,15 +251,11 @@ bfd_session_free(struct bfd_session *bs, __attribute__((unused)) void *arg)
 	free(bsd);
 }
 
-static int64_t
+static void
 bfd_session_control_tx_timeout(__attribute__((unused)) struct events_ctx *ec,
 			       void *arg)
 {
-	/* Send again. */
-	bfddp_send_control_packet(arg, NULL);
-
-	/* Reschedule timer. */
-	return bfddp_session_next_control_tx_interval(arg) / 1000;
+	bfd_session_update_control_tx(arg, NULL);
 }
 
 static void
@@ -275,29 +271,24 @@ bfd_session_update_control_tx(struct bfd_session *bs,
 			bsd->bsd_ec, bsd->bsd_txev,
 			bfddp_session_next_control_tx_interval(bs) / 1000,
 			bfd_session_control_tx_timeout, bs);
-	else
+	else {
 		bsd->bsd_txev = events_ctx_add_timer(
 			bsd->bsd_ec,
 			bfddp_session_next_control_tx_interval(bs) / 1000,
 			bfd_session_control_tx_timeout, bs);
+		events_ctx_keep_timer(bsd->bsd_txev);
+	}
 }
 
-static int64_t
+static void
 bfd_session_control_rx_timeout(__attribute__((unused)) struct events_ctx *ec,
 			       void *arg)
 {
 	struct bfd_session *bs = arg;
-	struct bfd_session_data *bsd = bs->bs_data;
 
 	bfddp_session_rx_timeout(bs, NULL);
 
 	bfd_session_debug(bs, "control packet receive timeout");
-
-	/* Remove the timer pointer since we'll get rid of it. */
-	bsd->bsd_rxev = NULL;
-
-	/* Get rid of this timer. */
-	return -1;
 }
 
 static void
@@ -320,11 +311,13 @@ bfd_session_update_control_rx(struct bfd_session *bs,
 			bsd->bsd_ec, bsd->bsd_rxev,
 			bfddp_session_next_control_rx_interval(bs) / 1000,
 			bfd_session_control_rx_timeout, bs);
-	else
+	else {
 		bsd->bsd_rxev = events_ctx_add_timer(
 			bsd->bsd_ec,
 			bfddp_session_next_control_rx_interval(bs) / 1000,
 			bfd_session_control_rx_timeout, bs);
+		events_ctx_keep_timer(bsd->bsd_rxev);
+	}
 }
 
 static void

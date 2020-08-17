@@ -92,23 +92,12 @@ struct timer_ctx
 #endif /* DOXYGEN_DOC */
 ;
 
-/**
- * Events context poll callbacks.
- *
- * Return `-1` to remove file descriptor from events context or the events you
- * want to watch now (e.g. `POLLIN`, `POLLOUT`).
- */
-typedef int (*events_ctx_cb)(struct events_ctx *ec, int fd, short revents,
-			     void *arg);
+/** Events context poll callbacks. */
+typedef void (*events_ctx_cb)(struct events_ctx *ec, int fd, short revents,
+			      void *arg);
 
-/**
- * Events context timer poll callbacks.
- *
- * Return `-1` to remove timer from events context or `N` (where `N` >= 0)
- * to schedule it again with the same parameters and next time out in `N`
- * milliseconds.
- */
-typedef int64_t (*events_ctx_timer_cb)(struct events_ctx *ec, void *arg);
+/** Events context timer poll callbacks. */
+typedef void (*events_ctx_timer_cb)(struct events_ctx *ec, void *arg);
 
 /**
  * Allocates events context data structure to be used with `bfddp_poll`.
@@ -223,6 +212,14 @@ struct timer_ctx *events_ctx_update_timer(struct events_ctx *ec,
  * \see events_ctx_update_timer, events_ctx_timer_cb.
  */
 void events_ctx_del_timer(struct events_ctx *ec, struct timer_ctx **tc);
+
+/**
+ * Mark timer for manual removal only: if `events_ctx_del_timer` is not called
+ * you'll have a memory leak in your hands.
+ *
+ * \param tc the timer to mark.
+ */
+void events_ctx_keep_timer(struct timer_ctx *tc);
 
 /*
  * packet.c

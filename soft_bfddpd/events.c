@@ -28,6 +28,7 @@
 
 #include <sys/poll.h>
 
+#include <assert.h>
 #include <errno.h>
 #include <string.h>
 #include <time.h>
@@ -46,6 +47,15 @@ struct pollfd_ctx {
 	void *pfc_arg;
 };
 
+enum timer_state_flag {
+	/** Mark as removed from timers tree. */
+	TSF_REMOVED = (1 << 0),
+	/** Don't auto remove (someone is keeping a reference). */
+	TSF_KEEP = (1 << 1),
+	/** This pointer timer can't be reused. */
+	TSF_INVALID = (1 << 2),
+};
+
 /** Auxiliary data structure for keeping timer data. */
 struct timer_ctx {
 	/** User expire time argument. */
@@ -56,6 +66,8 @@ struct timer_ctx {
 	events_ctx_timer_cb tc_cb;
 	/** The `pollfd` argument. */
 	void *tc_arg;
+	/** Timer state flags. */
+	uint32_t tc_flags;
 
 	/** Tree entry. */
 	RBT_ENTRY(timer_ctx) entry;
@@ -76,6 +88,8 @@ struct events_ctx {
 
 	/** Timers tree. */
 	struct timerst ec_timerst;
+	/** Deleted timers tree. */
+	struct timerst ec_deltimerst;
 	/** Current time cache. */
 	struct timespec ec_tv;
 	/** Next timer to timeout in milliseconds. */
@@ -93,6 +107,14 @@ timerst_cmp(const struct timer_ctx *tca, const struct timer_ctx *tcb)
 
 	/* Then by timeouts, callbacks and args. */
 	if (tca->tc_to == tcb->tc_to) {
+		/*
+		 * Special case for deletion list so it never fails to
+		 * insert.
+		 */
+		if (tca->tc_flags & TSF_REMOVED
+		    || tcb->tc_flags & TSF_REMOVED)
+			return -1;
+
 		if (tca->tc_cb == tcb->tc_cb)
 			return (int)((long)tca->tc_arg - (long)tcb->tc_arg);
 		else
@@ -133,6 +155,7 @@ events_ctx_new(size_t max_fds)
 	ec->ec_pfdcs = pfdcs;
 	ec->ec_pfds_total = max_fds;
 	RBT_INIT(timerst, &ec->ec_timerst);
+	RBT_INIT(timerst, &ec->ec_deltimerst);
 	clock_gettime(CLOCK_MONOTONIC, &ec->ec_tv);
 
 	/*
@@ -151,7 +174,7 @@ void
 events_ctx_free(struct events_ctx **ec)
 {
 	struct events_ctx *ecp;
-	struct timer_ctx *tc;
+	struct timer_ctx *tc, *tcp;
 
 	/* Convenience: allow user to pass NULL pointers. */
 	if (*ec == NULL)
@@ -160,8 +183,14 @@ events_ctx_free(struct events_ctx **ec)
 	ecp = *ec;
 	free(ecp->ec_pfds);
 	free(ecp->ec_pfdcs);
-	while ((tc = RBT_MIN(timerst, &ecp->ec_timerst)) != NULL)
-		events_ctx_del_timer(ecp, &tc);
+	while ((tc = RBT_MIN(timerst, &ecp->ec_timerst)) != NULL) {
+		tcp = tc;
+		events_ctx_del_timer(ecp, &tcp);
+	}
+	while ((tc = RBT_MIN(timerst, &ecp->ec_deltimerst)) != NULL) {
+		RBT_REMOVE(timerst, &ecp->ec_deltimerst, tc);
+		free(tc);
+	}
 
 	free(ecp);
 	*ec = NULL;
@@ -260,8 +289,11 @@ events_ctx_add_timer(struct events_ctx *ec, unsigned long to,
 		if (tcp->tc_to != to || tcp->tc_cb != cb || tcp->tc_arg != arg)
 			continue;
 
+		assert((tcp->tc_flags & TSF_INVALID) == 0);
+
 		/* Exact same parameters, lets update the timer. */
 		RBT_REMOVE(timerst, &ec->ec_timerst, tcp);
+		memset(&tcp->entry, 0, sizeof(tcp->entry));
 		goto update_timer;
 	}
 
@@ -281,7 +313,7 @@ update_timer:
 	/* Sanity check: insert should not fail, because its not duplicated. */
 	if (RBT_INSERT(timerst, &ec->ec_timerst, tcp) != NULL) {
 		dlog("timer insertion failed [to=%" PRIu64 "]", to);
-		free(tcp);
+		assert(RBT_INSERT(timerst, &ec->ec_deltimerst, tcp) != NULL);
 		errno = 0;
 		return NULL;
 	}
@@ -293,8 +325,13 @@ struct timer_ctx *
 events_ctx_update_timer(struct events_ctx *ec, struct timer_ctx *tc,
 			unsigned long to, events_ctx_timer_cb cb, void *arg)
 {
-	/* Remove from tree to avoid having it out of order. */
-	RBT_REMOVE(timerst, &ec->ec_timerst, tc);
+	assert((tc->tc_flags & TSF_INVALID) == 0);
+
+	/* Remove entry to put it back sorted. */
+	if ((tc->tc_flags & TSF_REMOVED) == 0) {
+		RBT_REMOVE(timerst, &ec->ec_timerst, tc);
+		memset(&tc->entry, 0, sizeof(tc->entry));
+	}
 
 	tc->tc_to = to;
 	tc->tc_cb = cb;
@@ -306,10 +343,13 @@ events_ctx_update_timer(struct events_ctx *ec, struct timer_ctx *tc,
 	/* Sanity check: insert should not fail, because its not duplicated. */
 	if (RBT_INSERT(timerst, &ec->ec_timerst, tc) != NULL) {
 		dlog("timer insertion failed [to=%" PRIu64 "]", to);
-		free(tc);
+		assert(RBT_INSERT(timerst, &ec->ec_deltimerst, tc) != NULL);
 		errno = 0;
 		return NULL;
 	}
+
+	/* Mark as in list (if it wasn't marked before. */
+	tc->tc_flags &= ~(uint32_t)TSF_REMOVED;
 
 	return tc;
 }
@@ -323,11 +363,38 @@ events_ctx_del_timer(struct events_ctx *ec, struct timer_ctx **tc)
 	if (*tc == NULL)
 		return;
 
+#ifdef DEBUG_EVENTS_TIMERS
+	RBT_FOREACH(tcp, timerst, &ec->ec_timerst) {
+		if (*tc != tcp)
+			continue;
+
+		if (((*tc)->tc_flags & TSF_REMOVED)) {
+			fprintf(stderr, "entry marked as removed, but in list\n");
+			assert(0);
+		}
+	}
+#endif /* DEBUG_EVENTS_TIMERS */
+
 	tcp = *tc;
-	RBT_REMOVE(timerst, &ec->ec_timerst, tcp);
-	free(tcp);
+	assert((tcp->tc_flags & TSF_INVALID) == 0);
+
+	/* Remove the entry if it wasn't removed by the timer activation. */
+	if ((tcp->tc_flags & TSF_REMOVED) == 0) {
+		RBT_REMOVE(timerst, &ec->ec_timerst, tcp);
+		memset(&tcp->entry, 0, sizeof(tcp->entry));
+		tcp->tc_flags |= TSF_REMOVED | TSF_INVALID;
+	}
+
+	/* Put entry into the free list. */
+	RBT_INSERT(timerst, &ec->ec_deltimerst, tcp);
 
 	*tc = NULL;
+}
+
+void
+events_ctx_keep_timer(struct timer_ctx *tc)
+{
+	tc->tc_flags |= TSF_KEEP;
 }
 
 static void
@@ -358,15 +425,13 @@ events_ctx_next_timeout(struct events_ctx *ec)
 int
 events_ctx_poll(struct events_ctx *ec)
 {
-	struct timer_ctx *tc, *tcn;
 	struct pollfd_ctx *pfdc;
+	struct timer_ctx *tc;
 	struct pollfd *pfd;
 	struct timespec tv;
 	int processed;
 	int events;
-	int flags;
 	uint64_t now;
-	int64_t next;
 	nfds_t i;
 
 	/* Calculate next timer event. */
@@ -395,21 +460,44 @@ events_ctx_poll(struct events_ctx *ec)
 	now = (uint64_t)(tv.tv_sec * 1000) + (uint64_t)(tv.tv_nsec / 1000000);
 
 	/* Process all timers that expired. */
-	RBT_FOREACH_SAFE(tc, timerst, &ec->ec_timerst, tcn) {
+	do {
+		tc = RBT_MIN(timerst, &ec->ec_timerst);
+		if (tc == NULL)
+			break;
+
+		/* Has the time of execution come? */
 		if (tc->tc_toc > now)
 			break;
 
-		next = tc->tc_cb(ec, tc->tc_arg);
-		if (next == -1) {
-			events_ctx_del_timer(ec, &tc);
-			continue;
-		}
+		/* Remove from tree to avoid having it out of order. */
+		RBT_REMOVE(timerst, &ec->ec_timerst, tc);
+		memset(&tc->entry, 0, sizeof(tc->entry));
+		tc->tc_flags |= TSF_REMOVED;
 
-		/* Set next expiration timer. */
-		tc->tc_to = (unsigned long)next;
-		events_ctx_update_timer(ec, tc, (unsigned long)next, tc->tc_cb,
-					tc->tc_arg);
-	}
+		/* Activate the callback: */
+		tc->tc_cb(ec, tc->tc_arg);
+	} while (true);
+
+	/* Free all unused timers memory. */
+	do {
+		tc = RBT_MIN(timerst, &ec->ec_deltimerst);
+		if (tc == NULL)
+			break;
+
+#ifdef DEBUG_EVENTS_TIMERS
+		{
+			struct timer_ctx *tcp;
+			RBT_FOREACH(tcp, timerst, &ec->ec_timerst) {
+				fprintf(stderr,
+					"Timer in two lists at same time\n");
+				assert(tcp != tc);
+			}
+		}
+#endif /* DEBUG_EVENTS_TIMERS */
+
+		RBT_REMOVE(timerst, &ec->ec_deltimerst, tc);
+		free(tc);
+	} while (true);
 
 	/* We've got a timeout, no file descriptors ready. */
 	if (events == 0) {
@@ -427,19 +515,10 @@ events_ctx_poll(struct events_ctx *ec)
 
 		processed++;
 
-		/* Remove from notifications if asked. */
-		flags = pfdc->pfc_cb(ec, pfd->fd, pfd->revents, pfdc->pfc_arg);
-		if (flags == -1) {
-			events_ctx_del_fd(ec, pfd->fd);
-
-			/*
-			 * Removing event change array order, so lets repeat
-			 * this index.
-			 */
+		pfdc->pfc_cb(ec, pfd->fd, pfd->revents, pfdc->pfc_arg);
+		/* Adjust the iteration array if a fd was removed. */
+		if (pfd->fd == -1)
 			i--;
-			continue;
-		} else
-			pfd->events = (short)flags;
 
 		/* We handled it all. */
 		if (processed == events)
