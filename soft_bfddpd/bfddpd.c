@@ -170,7 +170,7 @@ parse_address(const char *arg, struct sockaddr *sa, socklen_t *salen)
 		/* Parse port if any. */
 		sptr = strchr(sptr, ':');
 		if (sptr == NULL) {
-			sin->sin_port = htons(3000);
+			sin->sin_port = htons(BFD_DATA_PLANE_DEFAULT_PORT);
 		} else {
 			*sptr = 0;
 			sin->sin_port = htons(parse_port(sptr + 1));
@@ -185,7 +185,7 @@ parse_address(const char *arg, struct sockaddr *sa, socklen_t *salen)
 		/* Parse port if any. */
 		sptr = strrchr(sptr, ':');
 		if (sptr == NULL) {
-			sin6->sin6_port = htons(3000);
+			sin6->sin6_port = htons(BFD_DATA_PLANE_DEFAULT_PORT);
 		} else {
 			*sptr = 0;
 			sin6->sin6_port = htons(parse_port(sptr + 1));
