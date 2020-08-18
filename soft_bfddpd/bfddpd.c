@@ -133,11 +133,12 @@ parse_address(const char *arg, struct sockaddr *sa, socklen_t *salen)
 	struct sockaddr_in *sin;
 	struct sockaddr_in6 *sin6;
 	struct sockaddr_un *sun;
-	char *sptr;
-	size_t typelen;
+	char *sptr, *saux;
+	size_t slen;
 	char type[64];
 	char addr[64];
 
+	/* Basic parsing: find ':' to figure out type part and address part. */
 	sptr = strchr(arg, ':');
 	if (sptr == NULL) {
 		fprintf(stderr, "Invalid address format: %s\n", arg);
@@ -145,18 +146,20 @@ parse_address(const char *arg, struct sockaddr *sa, socklen_t *salen)
 	}
 
 	/* Calculate type string size. */
-	typelen = (size_t)(sptr - arg);
+	slen = (size_t)(sptr - arg);
 
 	/* Copy type string. */
 	sptr++;
-	memcpy(type, arg, typelen);
-	type[typelen] = 0;
+	memcpy(type, arg, slen);
+	type[slen] = 0;
 
 	/* Copy address part. */
 	snprintf(addr, sizeof(addr), "%s", sptr);
 
 	/* Reset SA values. */
 	memset(sa, 0, *salen);
+
+	/* Fill the address information. */
 	if (strcmp(type, "unix") == 0) {
 		sun = (struct sockaddr_un *)sa;
 		*salen = sizeof(*sun);
@@ -182,8 +185,25 @@ parse_address(const char *arg, struct sockaddr *sa, socklen_t *salen)
 		sin6->sin6_family = AF_INET6;
 		*salen = sizeof(*sin6);
 
+		/* Check for IPv6 enclosures '[]' */
+		sptr = &addr[0];
+		if (*sptr != '[')
+			errx(1, "%s: invalid IPv6 address: %s (try [::1])",
+			     __func__, addr);
+
+		saux = strrchr(addr, ']');
+		if (saux == NULL)
+			errx(1, "%s: invalid IPv6 address: %s (try [::1])",
+			     __func__, addr);
+
+		/* Consume the '[]:' part. */
+		slen = (size_t)(saux - sptr);
+		memmove(addr, addr + 1, slen);
+		addr[slen - 1] = 0;
+
 		/* Parse port if any. */
-		sptr = strrchr(sptr, ':');
+		saux++;
+		sptr = strrchr(saux, ':');
 		if (sptr == NULL) {
 			sin6->sin6_port = htons(BFD_DATA_PLANE_DEFAULT_PORT);
 		} else {
@@ -193,7 +213,8 @@ parse_address(const char *arg, struct sockaddr *sa, socklen_t *salen)
 
 		inet_pton(AF_INET6, addr, &sin6->sin6_addr);
 	} else {
-		fprintf(stderr, "invalid BFD HAL socket type: %s", type);
+		fprintf(stderr, "invalid BFD data plane socket type: %s\n",
+			type);
 		exit(1);
 	}
 }
