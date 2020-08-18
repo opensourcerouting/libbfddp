@@ -43,6 +43,9 @@
  */
 #define BFD_PROTOCOL_VERSION 1
 
+/** Default data plane port. */
+#define BFD_DATA_PLANE_DEFAULT_PORT 50700
+
 /** BFD single hop UDP port, as defined in RFC 5881 Section 4. Encapsulation. */
 #define BFD_SINGLE_HOP_PORT 3784
 
@@ -93,10 +96,10 @@ enum bfddp_message_type {
  * Data plane might use whatever precision it wants for `dp_time`
  * field, however if you want to be able to tell the delay between
  * data plane packet send and BFD daemon packet processing you should
- * use `gettimeofday()` and have the data plane clock sincronized with
+ * use `gettimeofday()` and have the data plane clock synchronized with
  * BFD daemon (not a problem if data plane runs in the same system).
  *
- * Normally data plane will only check the timestamp it sent to determine
+ * Normally data plane will only check the time stamp it sent to determine
  * the whole packet trip time.
  */
 struct bfddp_echo {
@@ -109,7 +112,7 @@ struct bfddp_echo {
 
 /** BFD session flags. */
 enum bfddp_session_flag {
-	/** Set when using multihop. */
+	/** Set when using multi hop. */
 	SESSION_MULTIHOP = (1 << 0),
 	/** Set when using demand mode. */
 	SESSION_DEMAND = (1 << 1),
@@ -164,10 +167,7 @@ struct bfddp_session {
 	 * without jitter.
 	 */
 	uint32_t min_echo_rx;
-	/**
-	 * Amount of milliseconds to wait before starting sending session
-	 * packets (only works when `SESSION_PASSIVE` flag is not set).
-	 */
+	/** Amount of milliseconds to wait before starting the session */
 	uint32_t hold_time;
 
 	/** Minimum TTL. */
@@ -257,14 +257,11 @@ struct bfddp_state_change {
  * BFD control packet state bits definition.
  */
 enum bfddp_control_state_bits {
-	/** Used to request connection establishement signal. */
+	/** Used to request connection establishment signal. */
 	STATE_POLL_BIT = (1 << 5),
-	/** Finalizes the connection establishement signal. */
+	/** Finalizes the connection establishment signal. */
 	STATE_FINAL_BIT = (1 << 4),
-	/**
-	 * Signalizes that the peer forward plane doesn't depend on control
-	 * plane.
-	 */
+	/** Signalizes that forward plane doesn't depend on control plane. */
 	STATE_CPI_BIT = (1 << 3),
 	/** Signalizes the use of authentication. */
 	STATE_AUTH_BIT = (1 << 2),
@@ -296,11 +293,11 @@ struct bfddp_control_packet {
 	uint32_t local_id;
 	/** Remote system discriminator. */
 	uint32_t remote_id;
-	/** Desired minimun send interval in microseconds. */
+	/** Desired minimum send interval in microseconds. */
 	uint32_t desired_tx;
-	/** Desired minimun receive interval in microseconds. */
+	/** Desired minimum receive interval in microseconds. */
 	uint32_t required_rx;
-	/** Desired minimun echo receive interval in microseconds. */
+	/** Desired minimum echo receive interval in microseconds. */
 	uint32_t required_echo_rx;
 };
 
