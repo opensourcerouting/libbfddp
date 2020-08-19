@@ -269,12 +269,12 @@ bfd_session_update_control_tx(struct bfd_session *bs,
 	if (bsd->bsd_txev)
 		bsd->bsd_txev = events_ctx_update_timer(
 			bsd->bsd_ec, bsd->bsd_txev,
-			bfddp_session_next_control_tx_interval(bs) / 1000,
+			bfddp_session_next_control_tx_interval(bs, true) / 1000,
 			bfd_session_control_tx_timeout, bs);
 	else {
 		bsd->bsd_txev = events_ctx_add_timer(
 			bsd->bsd_ec,
-			bfddp_session_next_control_tx_interval(bs) / 1000,
+			bfddp_session_next_control_tx_interval(bs, true) / 1000,
 			bfd_session_control_tx_timeout, bs);
 		events_ctx_keep_timer(bsd->bsd_txev);
 	}

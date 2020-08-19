@@ -800,7 +800,7 @@ apply_jitter(uint32_t total, bool dm_one)
 }
 
 uint32_t
-bfddp_session_next_control_tx_interval(struct bfd_session *bs)
+bfddp_session_next_control_tx_interval(struct bfd_session *bs, bool add_jitter)
 {
 	uint32_t selected_timer;
 
@@ -813,7 +813,10 @@ bfddp_session_next_control_tx_interval(struct bfd_session *bs)
 	else
 		selected_timer = bs->bs_rrx;
 
-	return apply_jitter(selected_timer, bs->bs_rdmultiplier == 1);
+	if (add_jitter)
+		return apply_jitter(selected_timer, bs->bs_rdmultiplier == 1);
+
+	return selected_timer;
 }
 
 uint32_t

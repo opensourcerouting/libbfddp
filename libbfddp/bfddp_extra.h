@@ -466,10 +466,13 @@ uint64_t nu64tohu64(uint64_t value);
  * Generate next send interval timeout.
  *
  * \param bs the BFD session to get the negotiated intervals.
+ * \param add_jitter apply jitter to the calculated interval (usually this
+ * is required to avoid sessions packet synchronization).
  *
  * \returns interval until next transmission in microseconds.
  */
-uint32_t bfddp_session_next_control_tx_interval(struct bfd_session *bs);
+uint32_t bfddp_session_next_control_tx_interval(struct bfd_session *bs,
+						bool add_jitter);
 
 /**
  * Generate next receive expiration interval timeout.
