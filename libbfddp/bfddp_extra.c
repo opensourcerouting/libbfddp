@@ -282,20 +282,22 @@ bfddp_session_free(struct bfd_session **bs, void *arg)
 	*bs = NULL;
 }
 
-ssize_t
-bfddp_send_control_packet(struct bfd_session *bs, void *arg)
+void
+bfddp_fill_control_packet(const struct bfd_session *bs,
+			  struct bfddp_control_packet *bcp)
 {
-	struct bfddp_control_packet bcp = {};
 	bool poll = bs->bs_poll;
 	uint8_t state = bs->bs_state & 0x03;
-	ssize_t rv;
+
+	memset(bcp, 0, sizeof(*bcp));
 
 	/* Sanity check: don't allow POLL and FINAL in the same packet. */
 	if (bs->bs_poll && bs->bs_final)
 		poll = false;
 
-	bcp.version_diag = (uint8_t)((1 << 5) | (bs->bs_diag & 0x1F));
-	bcp.state_bits =
+	bcp->version_diag =
+		(uint8_t)((BFD_PROTOCOL_VERSION << 5) | (bs->bs_diag & 0x1F));
+	bcp->state_bits =
 		(uint8_t)((state << 6u)		  /* Current state. */
 			  | (poll << 5u)	  /* Poll bit */
 			  | (bs->bs_final << 4u)  /* Final bit */
@@ -304,25 +306,34 @@ bfddp_send_control_packet(struct bfd_session *bs, void *arg)
 			  | (bs->bs_demand << 1u) /* Demand mode bit */
 			  | (0 << 0u));		  /* Multi point bit. */
 
-	bcp.detection_multiplier = bs->bs_dmultiplier;
-	bcp.length = sizeof(bcp);
-	bcp.local_id = htonl(bs->bs_lid);
-	bcp.remote_id = htonl(bs->bs_rid);
+	bcp->detection_multiplier = bs->bs_dmultiplier;
+	bcp->length = sizeof(*bcp);
+	bcp->local_id = htonl(bs->bs_lid);
+	bcp->remote_id = htonl(bs->bs_rid);
 
 	switch (bs->bs_state) {
 	case STATE_ADMINDOWN:
 	case STATE_DOWN:
-		bcp.desired_tx = htonl(bs->bs_cur_tx);
-		bcp.required_rx = htonl(bs->bs_cur_rx);
-		bcp.required_echo_rx = htonl(bs->bs_cur_erx);
+		bcp->desired_tx = htonl(bs->bs_cur_tx);
+		bcp->required_rx = htonl(bs->bs_cur_rx);
+		bcp->required_echo_rx = htonl(bs->bs_cur_erx);
 		break;
 	case STATE_INIT:
 	case STATE_UP:
-		bcp.desired_tx = htonl(bs->bs_tx);
-		bcp.required_rx = htonl(bs->bs_rx);
-		bcp.required_echo_rx = htonl(bs->bs_erx);
+		bcp->desired_tx = htonl(bs->bs_tx);
+		bcp->required_rx = htonl(bs->bs_rx);
+		bcp->required_echo_rx = htonl(bs->bs_erx);
 		break;
 	}
+}
+
+ssize_t
+bfddp_send_control_packet(struct bfd_session *bs, void *arg)
+{
+	struct bfddp_control_packet bcp;
+	ssize_t rv;
+
+	bfddp_fill_control_packet(bs, &bcp);
 
 	rv = bfddp_callbacks.bc_tx_control(bs, arg, &bcp);
 

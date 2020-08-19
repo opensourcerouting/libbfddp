@@ -333,6 +333,17 @@ void bfddp_session_update(struct bfd_session *bs, void *arg,
 void bfddp_session_free(struct bfd_session **bs, void *arg);
 
 /**
+ * Fill the BFD control packet with the information present in the session data
+ * structure.
+ *
+ * \param bs the BFD session.
+ * \param bcp the control packet buffer.
+ */
+void
+bfddp_fill_control_packet(const struct bfd_session *bs,
+			  struct bfddp_control_packet *bcp);
+
+/**
  * Sends a control packet using the session current state for generating
  * the packet. Packet modifications and others may be done before sending
  * the packet with the `bfddp_tx_control` callback.
