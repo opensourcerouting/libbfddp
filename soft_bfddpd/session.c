@@ -443,10 +443,10 @@ bfd_session_lookup_by_packet(const struct bfd_packet_metadata *bpm)
 				continue;
 		}
 
-		break;
+		return bs;
 	}
 
-	return bs;
+	return NULL;
 }
 
 uint32_t
