@@ -403,6 +403,22 @@ enum bfddp_packet_validation
 bfddp_session_validate_packet(const struct bfddp_control_packet *bcp,
 			      size_t bcplen);
 
+/** BFD control packet session validation results. */
+enum bfddp_packet_validation_extra {
+	/** Everything is fine. */
+	BPVE_OK = 0,
+	/** Invalid remote ID (our ID) discriminator. */
+	BPVE_REMOTE_ID_INVALID,
+	/** Authentication set, but not configured. */
+	BPVE_UNEXPECTED_AUTH,
+	/** Multi bit set, but not configured. */
+	BPVE_UNEXPECTED_MULTI,
+	/** Authentication not set, but configured. */
+	BPVE_AUTH_MISSING,
+	/** Authentication set, configured but different. */
+	BPVE_AUTH_INVALID,
+};
+
 /**
  * Function that should be called when the session receives a control packet.
  *
@@ -410,8 +426,9 @@ bfddp_session_validate_packet(const struct bfddp_control_packet *bcp,
  * \param arg application argument.
  * \param bcp the BFD control packet.
  */
-void bfddp_session_rx_packet(struct bfd_session *bs, void *arg,
-			     const struct bfddp_control_packet *bcp);
+enum bfddp_packet_validation_extra
+bfddp_session_rx_packet(struct bfd_session *bs, void *arg,
+			const struct bfddp_control_packet *bcp);
 
 
 /*

@@ -556,7 +556,7 @@ bfddp_session_validate_packet(const struct bfddp_control_packet *bcp,
 	return BPV_OK;
 }
 
-void
+enum bfddp_packet_validation_extra
 bfddp_session_rx_packet(struct bfd_session *bs, void *arg,
 			const struct bfddp_control_packet *bcp)
 {
@@ -566,6 +566,24 @@ bfddp_session_rx_packet(struct bfd_session *bs, void *arg,
 	/* Update session input data. */
 	bs->bs_crx_bytes += sizeof(*bcp);
 	bs->bs_crx_packets++;
+
+	/* Validate multi point. */
+	if (bcp->state_bits & STATE_MULTI_BIT)
+		return BPVE_UNEXPECTED_MULTI;
+
+	/*
+	 * Validate authentication.
+	 *
+	 * TODO: authentication support, then implement the validation for
+	 * `BPVE_AUTH_MISSING` and `BPVE_AUTH_INVALID`.
+	 */
+	if (bcp->state_bits & STATE_AUTH_BIT)
+		return BPVE_UNEXPECTED_AUTH;
+
+	/* Check our ID. */
+	if ((bs->bs_state == STATE_INIT || bs->bs_state == STATE_UP)
+	    && ntohl(bcp->remote_id) != bs->bs_lid)
+		return BPVE_REMOTE_ID_INVALID;
 
 	/* Copy remote system status. */
 	bs->bs_rstate = state;
@@ -591,7 +609,7 @@ bfddp_session_rx_packet(struct bfd_session *bs, void *arg,
 
 	/* Skip the rest if this session is shutdown. */
 	if (bs->bs_admin_shutdown)
-		return;
+		return BPVE_OK;
 
 	/*
 	 * RFC 5880 Section 6.8.6. Reception of BFD Control Packets:
@@ -655,6 +673,8 @@ bfddp_session_rx_packet(struct bfd_session *bs, void *arg,
 	bfddp_callbacks.bc_rx_control_update(bs, arg);
 
 	/* Handle echo timer not implemented. */
+
+	return BPVE_OK;
 }
 
 /*

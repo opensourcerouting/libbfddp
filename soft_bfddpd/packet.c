@@ -262,6 +262,7 @@ bfd_recv_control_packet(int sock)
 	struct bfd_session *bs;
 	int plen;
 	enum bfddp_packet_validation bpv;
+	enum bfddp_packet_validation_extra bpve;
 	struct bfd_packet_metadata bpm = {};
 
 	plen = bfd_recv_packet(sock, &bpm);
@@ -294,22 +295,6 @@ bfd_recv_control_packet(int sock)
 		break;
 	}
 
-	/* Discard multi point packets. */
-	if (bcp->state_bits & (STATE_MULTI_BIT)) {
-		error_stats.multi_point_drops++;
-		return;
-	}
-
-	/* Alert about unsupported modes. */
-	if (bcp->state_bits & STATE_AUTH_BIT) {
-		plog("unsupported authentication mode");
-		return;
-	}
-	if (bcp->state_bits & STATE_DEMAND_BIT) {
-		plog("unsupported demand mode");
-		return;
-	}
-
 	/*
 	 * If our ID is not set, then we must look up the session using other
 	 * packet attributes: source address, peer address, interface etc...
@@ -340,5 +325,20 @@ bfd_recv_control_packet(int sock)
 		}
 	}
 
-	bfddp_session_rx_packet(bs, NULL, bcp);
+	bpve = bfddp_session_rx_packet(bs, NULL, bcp);
+	switch (bpve) {
+	case BPVE_UNEXPECTED_MULTI:
+		error_stats.multi_point_drops++;
+		break;
+	case BPVE_REMOTE_ID_INVALID:
+		break;
+	case BPVE_UNEXPECTED_AUTH:
+	case BPVE_AUTH_MISSING:
+	case BPVE_AUTH_INVALID:
+		break;
+
+	case BPVE_OK:
+		/* NOTHING */
+		break;
+	}
 }
