@@ -60,6 +60,16 @@ bfddp_session_state_change_dummy(
 /* Our selected BFD integration callbacks. */
 struct bfddp_callbacks bfddp_callbacks;
 
+/** Macro to do callback check and print error when appropriated. */
+#define CALLBACK_CHECK(cb)                                                     \
+	do {                                                                   \
+		if (bfddp_callbacks.cb == NULL) {                              \
+			fprintf(stderr, "%s: callback " #cb " not set\n",      \
+				__func__);                                     \
+			exit(1);                                               \
+		}                                                              \
+	} while (0)
+
 void
 bfddp_initialize(struct bfddp_callbacks *bc)
 {
@@ -75,22 +85,11 @@ bfddp_initialize(struct bfddp_callbacks *bc)
 		bfddp_callbacks.bc_state_change =
 			bfddp_session_state_change_dummy;
 
-#define CALLBACK_CHECK(cb)                                                     \
-	do {                                                                   \
-		if (bfddp_callbacks.cb == NULL) {                              \
-			fprintf(stderr, "%s: callback " #cb " not set\n",      \
-				__func__);                                     \
-			exit(1);                                               \
-		}                                                              \
-	} while (0)
-
 	CALLBACK_CHECK(bc_tx_control);
 	CALLBACK_CHECK(bc_tx_control_update);
 	CALLBACK_CHECK(bc_tx_control_stop);
 	CALLBACK_CHECK(bc_rx_control_update);
 	CALLBACK_CHECK(bc_rx_control_stop);
-
-#undef CALLBACK_CHECK
 }
 
 /*
