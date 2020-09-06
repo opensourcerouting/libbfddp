@@ -559,7 +559,6 @@ bfddp_session_validate_packet(const struct bfddp_control_packet *bcp,
 			      size_t bcplen)
 {
 	enum bfd_state_value state;
-	uint8_t version;
 
 	/* Assert we have the received the whole packet. */
 	if (bcplen < (int)sizeof(*bcp))
@@ -570,8 +569,7 @@ bfddp_session_validate_packet(const struct bfddp_control_packet *bcp,
 		return BPV_INVALID_LENGTH;
 
 	/* Check version. */
-	version = (bcp->version_diag >> 5) & 0x07;
-	if (version != BFD_PROTOCOL_VERSION)
+	if (bfddp_read_control_packet_version(bcp) != BFD_PROTOCOL_VERSION)
 		return BPV_INVALID_VERSION;
 
 	/* Invalid detection multiplier. */
@@ -583,7 +581,7 @@ bfddp_session_validate_packet(const struct bfddp_control_packet *bcp,
 		return BPV_ZERO_LOCAL_ID;
 
 	/* Invalid remote ID with established session. */
-	state = (bcp->state_bits >> 6);
+	state = bfddp_read_control_packet_state(bcp);
 	if ((state == STATE_INIT || state == STATE_UP) && bcp->remote_id == 0)
 		return BPV_INVALID_REMOTE_ID;
 
@@ -594,7 +592,7 @@ enum bfddp_packet_validation_extra
 bfddp_session_rx_packet(struct bfd_session *bs, void *arg,
 			const struct bfddp_control_packet *bcp)
 {
-	enum bfd_state_value state = (bcp->state_bits >> 6);
+	enum bfd_state_value state = bfddp_read_control_packet_state(bcp);
 	bool timers_changed = false;
 
 	/* Update session input data. */
@@ -621,7 +619,7 @@ bfddp_session_rx_packet(struct bfd_session *bs, void *arg,
 
 	/* Copy remote system status. */
 	bs->bs_rstate = state;
-	bs->bs_rdiag = bcp->version_diag & 0x1F;
+	bs->bs_rdiag = bfddp_read_control_packet_diagnostic(bcp);
 	bs->bs_rid = ntohl(bcp->local_id);
 
 	/* Detect timers change: */

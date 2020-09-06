@@ -301,6 +301,26 @@ struct bfddp_control_packet {
 	uint32_t required_echo_rx;
 };
 
+/** helper function to standardize state bits reading. */
+static inline uint8_t __attribute__((always_inline))
+bfddp_read_control_packet_version(const struct bfddp_control_packet *bcp)
+{
+	return (bcp->version_diag >> 5) & 0x07;
+}
+
+static inline uint8_t __attribute__((always_inline))
+bfddp_read_control_packet_diagnostic(const struct bfddp_control_packet *bcp)
+{
+	return bcp->version_diag & 0x1F;
+}
+
+/** helper function to standardize state bits reading. */
+static inline uint8_t __attribute__((always_inline))
+bfddp_read_control_packet_state(const struct bfddp_control_packet *bcp)
+{
+	return bcp->state_bits >> 6;
+}
+
 /**
  * The protocol wire message header structure.
  */
