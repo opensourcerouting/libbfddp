@@ -625,14 +625,10 @@ bfddp_session_rx_packet(struct bfd_session *bs, void *arg,
 	bs->bs_rid = ntohl(bcp->local_id);
 
 	/* Detect timers change: */
-	if (ntohl(bcp->desired_tx) != bs->bs_rtx)
-		timers_changed = true;
-	else if (ntohl(bcp->required_rx) != bs->bs_rrx)
-		timers_changed = true;
-	else if (ntohl(bcp->required_echo_rx) != bs->bs_rerx)
-		timers_changed = true;
-	else if (bcp->detection_multiplier != bs->bs_rdmultiplier)
-		timers_changed = true;
+	timers_changed |= (ntohl(bcp->desired_tx) != bs->bs_rtx);
+	timers_changed |= (ntohl(bcp->required_rx) != bs->bs_rrx);
+	timers_changed |= (ntohl(bcp->required_echo_rx) != bs->bs_rerx);
+	timers_changed |= (bcp->detection_multiplier != bs->bs_rdmultiplier);
 
 	bs->bs_rtx = ntohl(bcp->desired_tx);
 	bs->bs_rrx = ntohl(bcp->required_rx);
