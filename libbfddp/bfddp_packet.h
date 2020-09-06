@@ -141,6 +141,9 @@ enum bfddp_session_flag {
 	SESSION_SHUTDOWN = (1 << 6),
 };
 
+/** Interface name theoretical maximum size. */
+#define BFDDP_INTERFACE_MAX_SIZE 64
+
 /**
  * `DP_ADD_SESSION`/`DP_DELETE_SESSION` data payload.
  *
@@ -193,7 +196,7 @@ struct bfddp_session {
 	/** Interface index (set to `0` when unavailable). */
 	uint32_t ifindex;
 	/** Interface name (empty when unavailable). */
-	char ifname[64];
+	char ifname[BFDDP_INTERFACE_MAX_SIZE];
 
 	/* TODO: missing authentication. */
 };
