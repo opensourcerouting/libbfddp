@@ -46,8 +46,8 @@ bfddp_process_echo_time(const struct bfddp_echo *echo)
 	struct timeval tv;
 
 	/* Collect registered timestamps. */
-	bfdt = nu64tohu64(echo->bfdd_time);
-	dpt = nu64tohu64(echo->dp_time);
+	bfdt = be64toh(echo->bfdd_time);
+	dpt = be64toh(echo->dp_time);
 
 	/* Measure new time. */
 	gettimeofday(&tv, NULL);

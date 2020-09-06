@@ -32,6 +32,7 @@
 #include <sys/un.h>
 #include <sys/time.h>
 
+#include <endian.h>
 #include <err.h>
 #include <errno.h>
 #include <poll.h>
@@ -200,36 +201,6 @@ parse_address(const char *arg, struct sockaddr *sa, socklen_t *salen)
 	}
 }
 
-static uint64_t
-hu64tonu64(uint64_t value)
-{
-	union {
-		uint32_t v32[2];
-		uint64_t v64;
-	} vu, *vp;
-
-	vp = (void *)&value;
-	vu.v32[0] = htonl(vp->v32[1]);
-	vu.v32[1] = htonl(vp->v32[0]);
-
-	return vu.v64;
-}
-
-static uint64_t
-nu64tohu64(uint64_t value)
-{
-	union {
-		uint32_t v32[2];
-		uint64_t v64;
-	} vu, *vp;
-
-	vp = (void *)&value;
-	vu.v32[0] = ntohl(vp->v32[1]);
-	vu.v32[1] = ntohl(vp->v32[0]);
-
-	return vu.v64;
-}
-
 static void
 bfddp_send_echo_request(struct bfddp_ctx *bctx)
 {
@@ -245,7 +216,7 @@ bfddp_send_echo_request(struct bfddp_ctx *bctx)
 	/* Payload data. */
 	gettimeofday(&tv, NULL);
 	msg.data.echo.dp_time =
-		hu64tonu64((uint64_t)((tv.tv_sec * 1000000) + tv.tv_usec));
+		htobe64((uint64_t)((tv.tv_sec * 1000000) + tv.tv_usec));
 
 	if (bfddp_write_enqueue(bctx, &msg) == 0)
 		errx(1, "%s: bfddp_write_enqueue failed", __func__);
@@ -266,7 +237,7 @@ bfddp_send_echo_reply(struct bfddp_ctx *bctx, uint64_t bfdd_time)
 	/* Payload data. */
 	gettimeofday(&tv, NULL);
 	msg.data.echo.dp_time =
-		hu64tonu64((uint64_t)((tv.tv_sec * 1000000) + tv.tv_usec));
+		htobe64((uint64_t)((tv.tv_sec * 1000000) + tv.tv_usec));
 	msg.data.echo.bfdd_time = bfdd_time;
 
 	if (bfddp_write_enqueue(bctx, &msg) == 0)
@@ -280,8 +251,8 @@ bfddp_process_echo_time(const struct bfddp_echo *echo)
 	struct timeval tv;
 
 	/* Collect registered timestamps. */
-	bfdt = nu64tohu64(echo->bfdd_time);
-	dpt = nu64tohu64(echo->dp_time);
+	bfdt = be64toh(echo->bfdd_time);
+	dpt = be64toh(echo->dp_time);
 
 	/* Measure new time. */
 	gettimeofday(&tv, NULL);

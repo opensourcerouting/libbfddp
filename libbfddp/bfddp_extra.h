@@ -482,16 +482,6 @@ size_t bfddp_session_reply_counters(struct bfddp_ctx *bctx, uint16_t id,
  */
 
 /**
- * Converts host uint64_t to network uint64_t.
- */
-uint64_t hu64tonu64(uint64_t value);
-
-/**
- * Converts network uint64_t to host uint64_t.
- */
-uint64_t nu64tohu64(uint64_t value);
-
-/**
  * Generate next send interval timeout.
  *
  * \param bs the BFD session to get the negotiated intervals.
