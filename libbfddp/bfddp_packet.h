@@ -52,6 +52,9 @@
 /** BFD multi hop UDP port, as defined in RFC 5883 Section 5. Encapsulation. */
 #define BFD_MULTI_HOP_PORT 4784
 
+/** BFD echo UDP port, as defined in RFC 5881 Section 4. Encapsulation. */
+#define BFD_ECHO_PORT 3785
+
 /** Default slow start multiplier. */
 #define SLOWSTART_DMULT 3
 /** Default slow start transmission speed. */
