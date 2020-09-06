@@ -150,6 +150,11 @@ parse_address(const char *arg, struct sockaddr *sa, socklen_t *salen)
 
 	/* Copy type string. */
 	sptr++;
+
+	/* Check if type is strangely long. */
+	if (slen >= sizeof(type))
+		errx(1, "%s: type is too long: %zu characters", __func__, slen);
+
 	memcpy(type, arg, slen);
 	type[slen] = 0;
 
