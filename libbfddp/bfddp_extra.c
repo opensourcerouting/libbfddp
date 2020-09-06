@@ -534,21 +534,24 @@ bfddp_session_state_machine(struct bfd_session *bs, void *arg,
 		break;
 	}
 
-	/* Call application callback to notify about state change. */
-	if (ostate != bs->bs_state) {
-		/*
-		 * If state changed from UP to DOWN and we are in passive mode,
-		 * then * we need to disable the RX/TX timers to avoid sending
-		 * new control packets.
-		 */
-		if (bs->bs_passive
-		    && (ostate == STATE_UP && bs->bs_state == STATE_DOWN)) {
-			bfddp_callbacks.bc_rx_control_stop(bs, arg);
-			bfddp_callbacks.bc_tx_control_stop(bs, arg);
-		}
+	/* No state change, just return. */
+	if (ostate == bs->bs_state)
+		return;
 
-		bfddp_callbacks.bc_state_change(bs, arg, ostate, bs->bs_state);
+	/*
+	 * Call application callback to notify about state change.
+	 *
+	 * If state changed from UP to DOWN and we are in passive mode,
+	 * then * we need to disable the RX/TX timers to avoid sending
+	 * new control packets.
+	 */
+	if (bs->bs_passive
+	    && (ostate == STATE_UP && bs->bs_state == STATE_DOWN)) {
+		bfddp_callbacks.bc_rx_control_stop(bs, arg);
+		bfddp_callbacks.bc_tx_control_stop(bs, arg);
 	}
+
+	bfddp_callbacks.bc_state_change(bs, arg, ostate, bs->bs_state);
 }
 
 enum bfddp_packet_validation
