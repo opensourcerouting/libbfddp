@@ -25,11 +25,33 @@
 
 #include <sys/time.h>
 
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "bfddp_extra.h"
+
+#define assert_msg(result, msg, args...)                                       \
+	do {                                                                   \
+		/* Check assertion result. */                                  \
+		if ((result) == 0)                                             \
+			break;                                                 \
+		/* Assertion failed, let's crash. */                           \
+		fatal_msg("%s:%d(%s): " msg, __FILE__, __LINE__, __func__,     \
+			  ##args);                                             \
+	} while (0)
+
+static void __attribute__((noreturn)) fatal_msg(const char *fmt, ...)
+{
+	va_list vl;
+
+	va_start(vl, fmt);
+	vfprintf(stderr, fmt, vl);
+	va_end(vl);
+
+	exit(1);
+}
 
 /*
  * Callback handling.
@@ -62,13 +84,7 @@ struct bfddp_callbacks bfddp_callbacks;
 
 /** Macro to do callback check and print error when appropriated. */
 #define CALLBACK_CHECK(cb)                                                     \
-	do {                                                                   \
-		if (bfddp_callbacks.cb == NULL) {                              \
-			fprintf(stderr, "%s: callback " #cb " not set\n",      \
-				__func__);                                     \
-			exit(1);                                               \
-		}                                                              \
-	} while (0)
+	assert_msg(bfddp_callbacks.cb == NULL, "callback " #cb " not set\n")
 
 void
 bfddp_initialize(struct bfddp_callbacks *bc)
@@ -418,6 +434,10 @@ bfddp_session_sm_down(struct bfd_session *bs, void *arg,
 	case STATE_UP:
 		/* NOTHING: we haven't and the peer hasn't sent INIT yet. */
 		break;
+
+	default:
+		assert_msg(0, "invalid state: %d", nstate);
+		break;
 	}
 }
 
@@ -454,6 +474,10 @@ bfddp_session_sm_init(struct bfd_session *bs, void *arg,
 		/* Notify state change. */
 		bfddp_send_session_state_change(bs);
 		break;
+
+	default:
+		assert_msg(0, "invalid state: %d", nstate);
+		break;
 	}
 }
 
@@ -478,6 +502,10 @@ bfddp_session_sm_up(struct bfd_session *bs, __attribute__((unused)) void *arg,
 	case STATE_UP:
 		/* NOTHING. */
 		break;
+
+	default:
+		assert_msg(0, "invalid state: %d", nstate);
+		break;
 	}
 }
 
@@ -499,6 +527,10 @@ bfddp_session_state_machine(struct bfd_session *bs, void *arg,
 		break;
 	case STATE_UP:
 		bfddp_session_sm_up(bs, arg, nstate);
+		break;
+
+	default:
+		assert_msg(0, "invalid state: %d", ostate);
 		break;
 	}
 
