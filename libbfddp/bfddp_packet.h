@@ -62,6 +62,19 @@
 #define SLOWSTART_ERX 0u
 
 /*
+ * Definitions of percentage for maximum allowed jitter value for transmission
+ * of control packets. This is needed in order to avoid session
+ * synchronization.
+ *
+ * See RFC 5880 Section 6.8.7. Transmitting BFD Control Packets.
+ */
+
+/** Maximum jitter percentage for detection multiplier == 1. */
+#define BFD_DM_ONE_MAX_JITTER 10
+/** Maximum jitter percentage for detection multiplier > 1. */
+#define BFD_DM_MAX_JITTER 25
+
+/*
  * BFD single hop source UDP ports. As defined in RFC 5881 Section 4.
  * Encapsulation.
  */

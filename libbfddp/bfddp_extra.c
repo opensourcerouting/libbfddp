@@ -850,10 +850,9 @@ apply_jitter(uint32_t total, bool dm_one)
 {
 	uint32_t jitter;
 
-	if (dm_one)
-		jitter = (uint32_t)(random() % 11);
-	else
-		jitter = (uint32_t)(random() % 26);
+	jitter = (uint32_t)(random()
+			    % (dm_one ? (BFD_DM_ONE_MAX_JITTER + 1)
+				      : (BFD_DM_MAX_JITTER + 1)));
 
 	return total - (total * (jitter / 100));
 }
