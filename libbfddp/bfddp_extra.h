@@ -258,6 +258,7 @@ typedef void (*bfddp_rx_control_stop_cb)(struct bfd_session *bs, void *arg);
  * BFD state change: it is called every time the session state changes.
  *
  * \param bs the BFD session.
+ * \param arg application argument.
  * \param ostate the old BFD session state.
  * \param nstate the new BFD session state.
  */
@@ -306,12 +307,12 @@ void bfddp_initialize(struct bfddp_callbacks *bc);
  * Allocates a new session data structure with the information that came from
  * FRR's BFD daemon.
  *
- * \param bds the BFD message.
+ * \param bctx FRR BFD data plane to talk to.
  * \param arg application argument.
- * \param bctx the FRR BFD data plane to talk to.
+ * \param bds BFD session message contents.
  */
 struct bfd_session *bfddp_session_new(struct bfddp_ctx *bctx, void *arg,
-				      const struct bfddp_session *bm);
+				      const struct bfddp_session *bds);
 
 /**
  * Allocates a new session data structure with the information that came from
@@ -329,6 +330,7 @@ void bfddp_session_update(struct bfd_session *bs, void *arg,
  * FRR's BFD daemon.
  *
  * \param bs the BFD session.
+ * \param arg application argument.
  */
 void bfddp_session_free(struct bfd_session **bs, void *arg);
 
@@ -339,9 +341,8 @@ void bfddp_session_free(struct bfd_session **bs, void *arg);
  * \param bs the BFD session.
  * \param bcp the control packet buffer.
  */
-void
-bfddp_fill_control_packet(const struct bfd_session *bs,
-			  struct bfddp_control_packet *bcp);
+void bfddp_fill_control_packet(const struct bfd_session *bs,
+			       struct bfddp_control_packet *bcp);
 
 /**
  * Sends a control packet using the session current state for generating
