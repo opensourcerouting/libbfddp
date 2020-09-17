@@ -343,6 +343,12 @@ bfddp_get_fd(const struct bfddp_ctx *bctx)
 	return bctx->sock;
 }
 
+void
+bfddp_set_fd(struct bfddp_ctx *bctx, int fd)
+{
+	bctx->sock = fd;
+}
+
 int
 bfddp_connect(struct bfddp_ctx *bctx, const struct sockaddr *sa,
 	      socklen_t salen)
