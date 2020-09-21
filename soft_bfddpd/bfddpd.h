@@ -33,6 +33,7 @@
 #include <stdlib.h>
 
 #include "bfddp.h"
+#include "bfddp_extra.h"
 
 #include "openbsd-tree.h"
 
@@ -91,23 +92,12 @@ struct timer_ctx
 #endif /* DOXYGEN_DOC */
 ;
 
-/**
- * Events context poll callbacks.
- *
- * Return `-1` to remove file descriptor from events context or the events you
- * want to watch now (e.g. `POLLIN`, `POLLOUT`).
- */
-typedef int (*events_ctx_cb)(struct events_ctx *ec, int fd, short revents,
-			     void *arg);
+/** Events context poll callbacks. */
+typedef void (*events_ctx_cb)(struct events_ctx *ec, int fd, short revents,
+			      void *arg);
 
-/**
- * Events context timer poll callbacks.
- *
- * Return `-1` to remove timer from events context or `N` (where `N` >= 0)
- * to schedule it again with the same parameters and next time out in `N`
- * milliseconds.
- */
-typedef int64_t (*events_ctx_timer_cb)(struct events_ctx *ec, void *arg);
+/** Events context timer poll callbacks. */
+typedef void (*events_ctx_timer_cb)(struct events_ctx *ec, void *arg);
 
 /**
  * Allocates events context data structure to be used with `bfddp_poll`.
@@ -223,6 +213,14 @@ struct timer_ctx *events_ctx_update_timer(struct events_ctx *ec,
  */
 void events_ctx_del_timer(struct events_ctx *ec, struct timer_ctx **tc);
 
+/**
+ * Mark timer for manual removal only: if `events_ctx_del_timer` is not called
+ * you'll have a memory leak in your hands.
+ *
+ * \param tc the timer to mark.
+ */
+void events_ctx_keep_timer(struct timer_ctx *tc);
+
 /*
  * packet.c
  */
@@ -233,22 +231,7 @@ void events_ctx_del_timer(struct events_ctx *ec, struct timer_ctx **tc);
 #endif /* PACKET_DEBUG */
 
 /* FRR protocol packets. */
-void bfddp_send_echo_request(struct bfddp_ctx *bctx);
-void bfddp_send_echo_reply(struct bfddp_ctx *bctx, uint64_t bfdd_time);
 void bfddp_process_echo_time(const struct bfddp_echo *echo);
-void bfddp_send_session_state_change(const struct bfd_session *bs);
-
-/**
- * Sends back to BFD daemon the updated session counters.
- *
- * \param bctx the data plane context to return answer.
- * \param msg the request message.
- */
-int bfd_session_reply_counters(struct bfddp_ctx *bctx,
-			       const struct bfddp_message *msg);
-
-/* BFD Protocol packets. */
-void bfd_send_control_packet(struct bfd_session *bs);
 
 /** Packet read data+metadata. */
 struct bfd_packet_metadata {
@@ -275,6 +258,10 @@ struct bfd_packet_metadata {
  */
 void bfd_recv_control_packet(int sock);
 
+/** BFD packet sending callback implementation. */
+ssize_t bfd_tx_control_cb(struct bfd_session *bs, void *arg,
+			  const struct bfddp_control_packet *bcp);
+
 /*
  * session.c
  */
@@ -283,30 +270,6 @@ void bfd_recv_control_packet(int sock);
 #else
 #define slog(fmt, args...) /* empty */
 #endif /* SESSION_DEBUG */
-
-/** BFD single hop UDP port, as defined in RFC 5881 Section 4. Encapsulation. */
-#define BFD_SINGLE_HOP_PORT 3784
-
-/* BFD single hop echo UDP port, as defind in RFC 5881 Section 4. Encapsulation. */
-#define BFD_SINGLE_HOP_ECHO_PORT 3785
-
-/** BFD multi hop UDP port, as defined in RFC 5883 Section 5. Encapsulation. */
-#define BFD_MULTI_HOP_PORT 4784
-
-/** BFD protocol version, as defind in RFC5880 Section 4.1 Generic BFD Control Packet Format. */
-#define BFD_PROTOCOL_VERSION 1
-
-#define SLOWSTART_DMULT 3
-#define SLOWSTART_TX 1000000u
-#define SLOWSTART_RX 1000000u
-#define SLOWSTART_ERX 0u
-
-/*
- * BFD single hop source UDP ports. As defined in RFC 5881 Section 4.
- * Encapsulation.
- */
-#define BFD_SOURCE_PORT_BEGIN 49152
-#define BFD_SOURCE_PORT_END 65535
 
 struct bfd_error_statistics {
 	/** Number of packets with invalid length */
@@ -323,117 +286,25 @@ struct bfd_error_statistics {
 	uint64_t invalid_session_drops;
 };
 
-struct bfd_session {
+struct bfd_session_data {
 	/** Events context pointer for scheduling timers/fds. */
-	struct events_ctx *bs_ec;
-	/** BFD Data Plane context for talking with FRR. */
-	struct bfddp_ctx *bs_bctx;
+	struct events_ctx *bsd_ec;
 
 	/** BFD Control packet transmission timeout event. */
-	struct timer_ctx *bs_txev;
+	struct timer_ctx *bsd_txev;
 	/** BFD Control packet receive timeout event. */
-	struct timer_ctx *bs_rxev;
-
-	/** Peer multiple hop indicator. */
-	bool bs_multihop;
-	/** Demand mode indicator. */
-	bool bs_demand;
-	/** Control Plane Indenpendant indicator. */
-	bool bs_cbit;
-	/** Echo mode indicator. */
-	bool bs_echo;
-	/** Passive mode indicator. */
-	bool bs_passive;
-	/** BFD timers poll indicator. */
-	bool bs_poll;
-	/** BFD final indicator. */
-	bool bs_final;
-
-	/** IPv4 address indicator. */
-	bool bs_ipv4;
-	/** Local address. */
-	union {
-		struct sockaddr bs_src_sa;
-		struct sockaddr_in bs_src_sin;
-		struct sockaddr_in6 bs_src_sin6;
-	} bs_src;
-	/** Remote address. */
-	union {
-		struct sockaddr bs_dst_sa;
-		struct sockaddr_in bs_dst_sin;
-		struct sockaddr_in6 bs_dst_sin6;
-	} bs_dst;
-
-	/** Local discriminator. */
-	uint32_t bs_lid;
-	/** Remote discriminator. */
-	uint32_t bs_rid;
-
-	/** Desired minimum transmission interval. */
-	uint32_t bs_tx;
-	/** Current desired minimum transmission interval. */
-	uint32_t bs_cur_tx;
-	/** Required minimum receive interval. */
-	uint32_t bs_rx;
-	/** Current required minimum receive interval. */
-	uint32_t bs_cur_rx;
-	/** Required minimum echo receive interval. */
-	uint32_t bs_erx;
-	/** Current required minimum echo receive interval. */
-	uint32_t bs_cur_erx;
-	/** Milliseconds to wait before starting session. */
-	uint32_t bs_hold;
-	/** Detection multipler. */
-	uint8_t bs_dmultiplier;
-	/** Currently used detection multipler. */
-	uint8_t bs_cur_dmultiplier;
-
-	/** Minimum amount of TTL to expect. */
-	uint8_t bs_minttl;
-
-	/** Interface index. */
-	uint32_t bs_ifindex;
-	/** Interface name. */
-	char bs_ifname[64];
-
-	/** Local state. */
-	enum bfd_state_value bs_state;
-	/** Local diagnostic. */
-	enum bfd_diagnostic_value bs_diag;
-	/** Remote state. */
-	enum bfd_state_value bs_rstate;
-	/** Remote diagnostic. */
-	enum bfd_diagnostic_value bs_rdiag;
-
-	/** Remote Control Plane Independent bit value. */
-	bool bs_rcbit;
-	/** Remote Demand mode bit value. */
-	bool bs_rdemand;
-
-	/** Remote desired minimum transmission interval. */
-	uint32_t bs_rtx;
-	/** Remote required minimum receive interval. */
-	uint32_t bs_rrx;
-	/** Remote required minimum echo receive interval. */
-	uint32_t bs_rerx;
-	/** Remote detection multipler. */
-	uint8_t bs_rdmultiplier;
+	struct timer_ctx *bsd_rxev;
 
 	/** Session socket. */
-	int bs_sock;
+	int bsd_sock;
 
-	/** Session control packet bytes input counter. */
-	uint64_t bs_crx_bytes;
-	/** Session control packet input counter. */
-	uint64_t bs_crx_packets;
-	/** Session control packet bytes output counter. */
-	uint64_t bs_ctx_bytes;
-	/** Session control packet output counter. */
-	uint64_t bs_ctx_packets;
+	/** Back pointer to BFD session data. */
+	struct bfd_session *bsd_bs;
+
 	/** Number of times this session went UP */
-	uint64_t bs_up_count;
+	uint64_t bsd_up_count;
 	/** Number of times this session went DOWN */
-	uint64_t bs_down_count;
+	uint64_t bsd_down_count;
 
 	RBT_ENTRY(bfd_session) entry;
 };
@@ -447,34 +318,6 @@ void bfd_session_init(void);
  * Session internal data structures tear down.
  */
 void bfd_session_finish(void);
-
-/**
- * Creates a new BFD session and associates it with the event context `ec`,
- * the FRR BFD instance `bctx` and use the FRR's BFD message
- *
- * \param ec the event context that will handle the session events.
- * \param bctx the FRR BFD data plane to talk to.
- * \param bdps the FRR's BFD message with session information.
- */
-struct bfd_session *bfd_session_new(struct events_ctx *ec,
-				    struct bfddp_ctx *bctx,
-				    const struct bfddp_session *bdps);
-
-/**
- * Update BFD session parameters using FRR's BFD message.
- *
- * \param bs the BFD session.
- * \param bdps FRR's BFD message.
- */
-void bfd_session_update(struct bfd_session *bs,
-			const struct bfddp_session *bdps);
-
-/**
- * Deletes BFD session using FRR's BFD message information.
- *
- * \param bdps FRR's BFD message.
- */
-void bfd_session_delete(const struct bfddp_session *bdps);
 
 /**
  * Look up session using discriminator.
@@ -501,30 +344,6 @@ bfd_session_lookup_by_packet(const struct bfd_packet_metadata *bpm);
  */
 void bfd_session_state_machine(struct bfd_session *bs,
 			       enum bfd_state_value nstate);
-
-/**
- * This function should be called everytime a control packet is received,
- * it will update the control packet expiration timer.
- *
- * \param bs the BFD session.
- */
-void bfd_session_update_control_rx(struct bfd_session *bs);
-
-/**
- * Update transmission timer: call this function when the local desired
- * transmission interval or the remote minimum receive interval changes.
- *
- * \param bs the BFD session.
- */
-void bfd_session_update_control_tx(struct bfd_session *bs);
-
-/**
- * This function should be called everytime a control packet is received
- * with the final bit.
- *
- * \param bs the BFD session.
- */
-void bfd_session_final_event(struct bfd_session *bs);
 
 /**
  * Generate a random number.

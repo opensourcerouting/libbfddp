@@ -28,8 +28,6 @@
 #include <stdarg.h>
 #include <stdio.h>
 
-#include "bfddp.h"
-#include "bfddp_packet.h"
 #include "bfddpd.h"
 
 static const char *bfd_session_states[] = {
@@ -64,7 +62,7 @@ bfd_session_debug(const struct bfd_session *bs, const char *fmt, ...)
 	int af = bs->bs_dst.bs_dst_sa.sa_family;
 	va_list vl;
 	uint16_t sport = 0, dport = 0;
-	char sbuf[INET6_ADDRSTRLEN], dbuf[INET6_ADDRSTRLEN];
+	char sbuf[INET6_ADDRSTRLEN] = {}, dbuf[INET6_ADDRSTRLEN] = {};
 	char msg[512];
 
 	switch (af) {
@@ -108,7 +106,6 @@ bfd_session_debug(const struct bfd_session *bs, const char *fmt, ...)
 void
 bfd_session_dump(const struct bfd_session *bs)
 {
-
 	bfd_session_debug(
 		bs, "%s%s%s%stx,rx,erx[%u,%u,%u r:%u,%u,%u] multi[%d, r:%d]",
 		bs->bs_passive ? "passive " : "",

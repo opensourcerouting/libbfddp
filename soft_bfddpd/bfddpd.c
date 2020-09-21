@@ -25,19 +25,12 @@
 
 #include <arpa/inet.h>
 #include <sys/poll.h>
-#include <sys/socket.h>
-#include <sys/time.h>
-#include <sys/types.h>
 #include <sys/un.h>
 
 #include <err.h>
 #include <errno.h>
-#include <poll.h>
 #include <signal.h>
-#include <stdbool.h>
 #include <stdio.h>
-#include <stdlib.h>
-#include <time.h>
 #include <unistd.h>
 
 #include "bfddp.h"
@@ -71,7 +64,8 @@ static void bfddp_handle_message(struct events_ctx *ec, struct bfddp_ctx *bctx);
 /**
  * Handle common read/write events.
  */
-static int bfddp_event(struct events_ctx *ec, int fd, short revents, void *arg);
+static void bfddp_event(struct events_ctx *ec, int fd, short revents,
+			void *arg);
 
 /*
  * Helper functions.
@@ -139,11 +133,12 @@ parse_address(const char *arg, struct sockaddr *sa, socklen_t *salen)
 	struct sockaddr_in *sin;
 	struct sockaddr_in6 *sin6;
 	struct sockaddr_un *sun;
-	char *sptr;
-	size_t typelen;
+	char *sptr, *saux;
+	size_t slen;
 	char type[64];
 	char addr[64];
 
+	/* Basic parsing: find ':' to figure out type part and address part. */
 	sptr = strchr(arg, ':');
 	if (sptr == NULL) {
 		fprintf(stderr, "Invalid address format: %s\n", arg);
@@ -151,18 +146,25 @@ parse_address(const char *arg, struct sockaddr *sa, socklen_t *salen)
 	}
 
 	/* Calculate type string size. */
-	typelen = (size_t)(sptr - arg);
+	slen = (size_t)(sptr - arg);
 
 	/* Copy type string. */
 	sptr++;
-	memcpy(type, arg, typelen);
-	type[typelen] = 0;
+
+	/* Check if type is strangely long. */
+	if (slen >= sizeof(type))
+		errx(1, "%s: type is too long: %zu characters", __func__, slen);
+
+	memcpy(type, arg, slen);
+	type[slen] = 0;
 
 	/* Copy address part. */
 	snprintf(addr, sizeof(addr), "%s", sptr);
 
 	/* Reset SA values. */
 	memset(sa, 0, *salen);
+
+	/* Fill the address information. */
 	if (strcmp(type, "unix") == 0) {
 		sun = (struct sockaddr_un *)sa;
 		*salen = sizeof(*sun);
@@ -176,7 +178,7 @@ parse_address(const char *arg, struct sockaddr *sa, socklen_t *salen)
 		/* Parse port if any. */
 		sptr = strchr(sptr, ':');
 		if (sptr == NULL) {
-			sin->sin_port = htons(3000);
+			sin->sin_port = htons(BFD_DATA_PLANE_DEFAULT_PORT);
 		} else {
 			*sptr = 0;
 			sin->sin_port = htons(parse_port(sptr + 1));
@@ -188,10 +190,27 @@ parse_address(const char *arg, struct sockaddr *sa, socklen_t *salen)
 		sin6->sin6_family = AF_INET6;
 		*salen = sizeof(*sin6);
 
+		/* Check for IPv6 enclosures '[]' */
+		sptr = &addr[0];
+		if (*sptr != '[')
+			errx(1, "%s: invalid IPv6 address: %s (try [::1])",
+			     __func__, addr);
+
+		saux = strrchr(addr, ']');
+		if (saux == NULL)
+			errx(1, "%s: invalid IPv6 address: %s (try [::1])",
+			     __func__, addr);
+
+		/* Consume the '[]:' part. */
+		slen = (size_t)(saux - sptr);
+		memmove(addr, addr + 1, slen);
+		addr[slen - 1] = 0;
+
 		/* Parse port if any. */
-		sptr = strrchr(sptr, ':');
+		saux++;
+		sptr = strrchr(saux, ':');
 		if (sptr == NULL) {
-			sin6->sin6_port = htons(3000);
+			sin6->sin6_port = htons(BFD_DATA_PLANE_DEFAULT_PORT);
 		} else {
 			*sptr = 0;
 			sin6->sin6_port = htons(parse_port(sptr + 1));
@@ -199,7 +218,8 @@ parse_address(const char *arg, struct sockaddr *sa, socklen_t *salen)
 
 		inet_pton(AF_INET6, addr, &sin6->sin6_addr);
 	} else {
-		fprintf(stderr, "invalid BFD HAL socket type: %s", type);
+		fprintf(stderr, "invalid BFD data plane socket type: %s\n",
+			type);
 		exit(1);
 	}
 }
@@ -254,11 +274,11 @@ main(int argc, char *argv[])
 }
 
 /* Forward declaration. */
-static int bfddp_connect_event(struct events_ctx *ec, int fd, short revents,
-			       void *arg);
+static void bfddp_connect_event(struct events_ctx *ec, int fd, short revents,
+			        void *arg);
 static int bfd_single_hop_socket(void);
-static int bfd_single_hop_recv(struct events_ctx *ec, int sock, short revents,
-			       void *arg);
+static void bfd_single_hop_recv(struct events_ctx *ec, int sock, short revents,
+			        void *arg);
 
 static void __attribute__((noreturn))
 bfddp_main(const struct sockaddr *sa, socklen_t salen)
@@ -276,6 +296,9 @@ bfddp_main(const struct sockaddr *sa, socklen_t salen)
 	bctx = bfddp_new(0, 0);
 	if (bctx == NULL)
 		err(1, "%s: bfddp_new", __func__);
+
+	/* Initialize BFD sessions handler. */
+	bfd_session_init();
 
 	/* Connect to BFD daemon. */
 	if (bfddp_connect(bctx, sa, salen) == -1)
@@ -319,7 +342,7 @@ bfddp_main(const struct sockaddr *sa, socklen_t salen)
 	exit(0);
 }
 
-static int
+static void
 bfddp_connect_event(struct events_ctx *ec, int fd, short revents, void *arg)
 {
 	int rv;
@@ -333,16 +356,16 @@ bfddp_connect_event(struct events_ctx *ec, int fd, short revents, void *arg)
 	if (rv == -1)
 		err(1, "%s: bfddp_is_connected", __func__);
 	/* Handle interruptions: ask for more writes. */
-	if (rv == 1)
-		return POLLOUT;
+	if (rv == 1) {
+		events_ctx_add_fd(ec, fd, POLLOUT, bfddp_connect_event, arg);
+		return;
+	}
 
 	/* Ask for echo. */
 	bfddp_send_echo_request(arg);
 
 	/* Add our descriptor for read/write with new callback. */
 	events_ctx_add_fd(ec, fd, POLLIN | POLLOUT, bfddp_event, arg);
-
-	return POLLIN | POLLOUT;
 }
 
 static void
@@ -392,7 +415,7 @@ bfddp_read_event(struct events_ctx *ec, struct bfddp_ctx *bctx)
 	bfddp_handle_message(ec, bctx);
 }
 
-static int
+static void
 bfddp_event(struct events_ctx *ec, __attribute__((unused)) int fd,
 	    short revents, void *arg)
 {
@@ -410,7 +433,7 @@ bfddp_event(struct events_ctx *ec, __attribute__((unused)) int fd,
 	if (bfddp_write_pending(arg))
 		events |= POLLOUT;
 
-	return events;
+	events_ctx_add_fd(ec, fd, events, bfddp_event, arg);
 }
 
 static void __attribute__((noreturn))
@@ -423,24 +446,22 @@ bfddp_terminate(struct bfddp_ctx *bctx)
 	exit(0);
 }
 
-static int64_t
-bfddp_echo_request_event(struct events_ctx *ec, void *arg)
+static void
+bfddp_echo_request_event(__attribute__((unused)) struct events_ctx *ec,
+			 void *arg)
 {
-	struct bfddp_ctx *bctx = arg;
-
 	/* Enqueue echo request. */
-	bfddp_send_echo_request(bctx);
+	bfddp_send_echo_request(arg);
 
-	/* Ask for POLLOUT. */
-	events_ctx_add_fd(ec, bfddp_get_fd(bctx), POLLIN | POLLOUT, bfddp_event,
-			  bctx);
-
-	return -1;
+	/* Ask to send the echo request. */
+	events_ctx_add_fd(ec, bfddp_get_fd(arg), POLLIN | POLLOUT, bfddp_event,
+			  arg);
 }
 
 static void
 bfddp_handle_message(struct events_ctx *ec, struct bfddp_ctx *bctx)
 {
+	struct bfd_session *bs;
 	struct bfddp_message *msg;
 	enum bfddp_message_type bmt;
 
@@ -461,13 +482,21 @@ bfddp_handle_message(struct events_ctx *ec, struct bfddp_ctx *bctx)
 					     bctx);
 			break;
 		case DP_ADD_SESSION:
-			bfd_session_new(ec, bctx, &msg->data.session);
+			bs = bfd_session_lookup(ntohl(msg->data.session.lid));
+			if (bs == NULL)
+				bfddp_session_new(bctx, ec, &msg->data.session);
+			else
+				bfddp_session_update(bs, NULL,
+						     &msg->data.session);
 			break;
 		case DP_DELETE_SESSION:
-			bfd_session_delete(&msg->data.session);
+			bs = bfd_session_lookup(ntohl(msg->data.session.lid));
+			bfddp_session_free(&bs, NULL);
 			break;
 		case DP_REQUEST_SESSION_COUNTERS:
-			bfd_session_reply_counters(bctx, msg);
+			bs = bfd_session_lookup(
+				ntohl(msg->data.counters_req.lid));
+			bfddp_session_reply_counters(bctx, msg->header.id, bs);
 			break;
 
 		case BFD_SESSION_COUNTERS:
@@ -487,7 +516,7 @@ bfddp_handle_message(struct events_ctx *ec, struct bfddp_ctx *bctx)
 	bfddp_read_finish(bctx);
 }
 
-static int
+static void
 bfd_single_hop_recv(__attribute__((unused)) struct events_ctx *ec, int sock,
 		    short revents, __attribute__((unused)) void *arg)
 {
@@ -498,7 +527,7 @@ bfd_single_hop_recv(__attribute__((unused)) struct events_ctx *ec, int sock,
 	bfd_recv_control_packet(sock);
 
 	/* Always read more. */
-	return POLLIN;
+	events_ctx_add_fd(ec, sock, POLLIN, bfd_single_hop_recv, NULL);
 }
 
 static int

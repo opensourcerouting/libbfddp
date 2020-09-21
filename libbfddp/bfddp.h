@@ -75,6 +75,15 @@ void bfddp_free(struct bfddp_ctx *bctx);
 int bfddp_get_fd(const struct bfddp_ctx *bctx);
 
 /**
+ * Sets the BFD Data Plane socket file descriptor. This function is useful when
+ * socket handling is made outside the library code for any reason.
+ *
+ * \param[in,out] bctx the BFD daemon communication context.
+ * \param[in] fd the socket file descriptor.
+ */
+void bfddp_set_fd(struct bfddp_ctx *bctx, int fd);
+
+/**
  * Creates the BFD daemon socket to exchange the messages.
  *
  * \param[in,out] bctx the BFD daemon communication context.

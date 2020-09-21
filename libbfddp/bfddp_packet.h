@@ -33,6 +33,57 @@
 
 #include <stdint.h>
 
+/*
+ * Protocol definitions.
+ */
+
+/**
+ * BFD protocol version as defined in RFC5880 Section 4.1 Generic BFD Control
+ * Packet Format.
+ */
+#define BFD_PROTOCOL_VERSION 1
+
+/** Default data plane port. */
+#define BFD_DATA_PLANE_DEFAULT_PORT 50700
+
+/** BFD single hop UDP port, as defined in RFC 5881 Section 4. Encapsulation. */
+#define BFD_SINGLE_HOP_PORT 3784
+
+/** BFD multi hop UDP port, as defined in RFC 5883 Section 5. Encapsulation. */
+#define BFD_MULTI_HOP_PORT 4784
+
+/** BFD echo UDP port, as defined in RFC 5881 Section 4. Encapsulation. */
+#define BFD_ECHO_PORT 3785
+
+/** Default slow start multiplier. */
+#define SLOWSTART_DMULT 3
+/** Default slow start transmission speed. */
+#define SLOWSTART_TX 1000000u
+/** Default slow start receive speed. */
+#define SLOWSTART_RX 1000000u
+/** Default slow start echo receive speed. */
+#define SLOWSTART_ERX 0u
+
+/*
+ * Definitions of percentage for maximum allowed jitter value for transmission
+ * of control packets. This is needed in order to avoid session
+ * synchronization.
+ *
+ * See RFC 5880 Section 6.8.7. Transmitting BFD Control Packets.
+ */
+
+/** Maximum jitter percentage for detection multiplier == 1. */
+#define BFD_DM_ONE_MAX_JITTER 10
+/** Maximum jitter percentage for detection multiplier > 1. */
+#define BFD_DM_MAX_JITTER 25
+
+/*
+ * BFD single hop source UDP ports. As defined in RFC 5881 Section 4.
+ * Encapsulation.
+ */
+#define BFD_SOURCE_PORT_BEGIN 49152
+#define BFD_SOURCE_PORT_END 65535
+
 /** BFD data plane protocol version. */
 #define BFD_DP_VERSION 1
 
@@ -61,10 +112,10 @@ enum bfddp_message_type {
  * Data plane might use whatever precision it wants for `dp_time`
  * field, however if you want to be able to tell the delay between
  * data plane packet send and BFD daemon packet processing you should
- * use `gettimeofday()` and have the data plane clock sincronized with
+ * use `gettimeofday()` and have the data plane clock synchronized with
  * BFD daemon (not a problem if data plane runs in the same system).
  *
- * Normally data plane will only check the timestamp it sent to determine
+ * Normally data plane will only check the time stamp it sent to determine
  * the whole packet trip time.
  */
 struct bfddp_echo {
@@ -77,7 +128,7 @@ struct bfddp_echo {
 
 /** BFD session flags. */
 enum bfddp_session_flag {
-	/** Set when using multihop. */
+	/** Set when using multi hop. */
 	SESSION_MULTIHOP = (1 << 0),
 	/** Set when using demand mode. */
 	SESSION_DEMAND = (1 << 1),
@@ -89,7 +140,12 @@ enum bfddp_session_flag {
 	SESSION_IPV6 = (1 << 4),
 	/** Set when using passive mode. */
 	SESSION_PASSIVE = (1 << 5),
+	/** Set when session is administrative down. */
+	SESSION_SHUTDOWN = (1 << 6),
 };
+
+/** Interface name theoretical maximum size. */
+#define BFDDP_INTERFACE_MAX_SIZE 64
 
 /**
  * `DP_ADD_SESSION`/`DP_DELETE_SESSION` data payload.
@@ -130,10 +186,7 @@ struct bfddp_session {
 	 * without jitter.
 	 */
 	uint32_t min_echo_rx;
-	/**
-	 * Amount of milliseconds to wait before starting sending session
-	 * packets (only works when `SESSION_PASSIVE` flag is not set).
-	 */
+	/** Amount of milliseconds to wait before starting the session */
 	uint32_t hold_time;
 
 	/** Minimum TTL. */
@@ -146,7 +199,7 @@ struct bfddp_session {
 	/** Interface index (set to `0` when unavailable). */
 	uint32_t ifindex;
 	/** Interface name (empty when unavailable). */
-	char ifname[64];
+	char ifname[BFDDP_INTERFACE_MAX_SIZE];
 
 	/* TODO: missing authentication. */
 };
@@ -223,14 +276,11 @@ struct bfddp_state_change {
  * BFD control packet state bits definition.
  */
 enum bfddp_control_state_bits {
-	/** Used to request connection establishement signal. */
+	/** Used to request connection establishment signal. */
 	STATE_POLL_BIT = (1 << 5),
-	/** Finalizes the connection establishement signal. */
+	/** Finalizes the connection establishment signal. */
 	STATE_FINAL_BIT = (1 << 4),
-	/**
-	 * Signalizes that the peer forward plane doesn't depend on control
-	 * plane.
-	 */
+	/** Signalizes that forward plane doesn't depend on control plane. */
 	STATE_CPI_BIT = (1 << 3),
 	/** Signalizes the use of authentication. */
 	STATE_AUTH_BIT = (1 << 2),
@@ -262,13 +312,33 @@ struct bfddp_control_packet {
 	uint32_t local_id;
 	/** Remote system discriminator. */
 	uint32_t remote_id;
-	/** Desired minimun send interval in microseconds. */
+	/** Desired minimum send interval in microseconds. */
 	uint32_t desired_tx;
-	/** Desired minimun receive interval in microseconds. */
+	/** Desired minimum receive interval in microseconds. */
 	uint32_t required_rx;
-	/** Desired minimun echo receive interval in microseconds. */
+	/** Desired minimum echo receive interval in microseconds. */
 	uint32_t required_echo_rx;
 };
+
+/** helper function to standardize state bits reading. */
+static inline uint8_t __attribute__((always_inline))
+bfddp_read_control_packet_version(const struct bfddp_control_packet *bcp)
+{
+	return (bcp->version_diag >> 5) & 0x07;
+}
+
+static inline uint8_t __attribute__((always_inline))
+bfddp_read_control_packet_diagnostic(const struct bfddp_control_packet *bcp)
+{
+	return bcp->version_diag & 0x1F;
+}
+
+/** helper function to standardize state bits reading. */
+static inline uint8_t __attribute__((always_inline))
+bfddp_read_control_packet_state(const struct bfddp_control_packet *bcp)
+{
+	return bcp->state_bits >> 6;
+}
 
 /**
  * The protocol wire message header structure.
