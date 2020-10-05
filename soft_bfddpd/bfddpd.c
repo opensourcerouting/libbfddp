@@ -302,7 +302,7 @@ bfddp_main(const struct sockaddr *sa, socklen_t salen)
 
 	/* Connect to BFD daemon. */
 	if (bfddp_connect(bctx, sa, salen) == -1)
-		err(1, "%s: bfddp_connect", __func__);
+		bfddp_err(1, "%s: bfddp_connect", __func__);
 
 	/* Ask for events context to notify us. */
 	events_ctx_add_fd(ec, bfddp_get_fd(bctx), POLLOUT, bfddp_connect_event,

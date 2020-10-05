@@ -80,6 +80,19 @@ bfddp_session_state_change_dummy(
 {
 }
 
+static struct bfd_session *
+bfddp_session_lookup_dummy(__attribute__((unused)) uint32_t lid)
+{
+	return NULL;
+}
+
+static struct bfd_session *
+bfddp_session_lookup_by_packet_dummy(
+	__attribute__((unused)) const struct bfd_packet_metadata *bpm)
+{
+	return NULL;
+}
+
 /* Our selected BFD integration callbacks. */
 struct bfddp_callbacks bfddp_callbacks;
 
@@ -101,6 +114,11 @@ bfddp_initialize(struct bfddp_callbacks *bc)
 	if (bfddp_callbacks.bc_state_change == NULL)
 		bfddp_callbacks.bc_state_change =
 			bfddp_session_state_change_dummy;
+	if (bfddp_callbacks.bc_session_lookup == NULL)
+		bfddp_callbacks.bc_session_lookup = bfddp_session_lookup_dummy;
+	if (bfddp_callbacks.bc_session_lookup_by_packet == NULL)
+		bfddp_callbacks.bc_session_lookup_by_packet =
+			bfddp_session_lookup_by_packet_dummy;
 
 	CALLBACK_CHECK(bc_tx_control);
 	CALLBACK_CHECK(bc_tx_control_update);
@@ -372,6 +390,7 @@ bfddp_session_rx_timeout(struct bfd_session *bs, void *arg)
 	/* Tell FRR's BFD daemon the session is down. */
 	bs->bs_state = STATE_DOWN;
 	bs->bs_diag = bs->bs_rdiag = DIAG_CONTROL_EXPIRED;
+	bs->bs_rid = 0;
 	bfddp_session_set_slowstart(bs);
 
 	/* Disable timers if configured for passive mode. */
@@ -429,6 +448,9 @@ bfddp_session_sm_down(struct bfd_session *bs, void *arg,
 		/* Start polling. */
 		bs->bs_poll = true;
 
+		/* Immediately inform the peer */
+		bfddp_send_control_packet(bs, arg);
+
 		/* Notify state change. */
 		bfddp_send_session_state_change(bs);
 		break;
@@ -471,6 +493,9 @@ bfddp_session_sm_init(struct bfd_session *bs, void *arg,
 
 		/* Start polling. */
 		bs->bs_poll = true;
+		
+		/* Immediately inform the peer */
+		bfddp_send_control_packet(bs, arg);
 
 		/* Notify state change. */
 		bfddp_send_session_state_change(bs);
@@ -687,6 +712,8 @@ bfddp_session_rx_packet(struct bfd_session *bs, void *arg,
 	 * > bit set (see section 6.8.7).
 	 */
 	if (bcp->state_bits & STATE_POLL_BIT) {
+		/* Keep track of local poll value. */
+		bool poll = bs->bs_poll;
 		bs->bs_poll = false;
 		bs->bs_final = true;
 
@@ -694,6 +721,8 @@ bfddp_session_rx_packet(struct bfd_session *bs, void *arg,
 		bfddp_send_control_packet(bs, arg);
 
 		bs->bs_final = false;
+		/* Restore local poll value. */
+		bs->bs_poll = poll;
 	}
 
 	bfddp_session_state_machine(bs, arg, bs->bs_rstate);

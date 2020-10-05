@@ -235,30 +235,21 @@ void events_ctx_keep_timer(struct timer_ctx *tc);
 /* FRR protocol packets. */
 void bfddp_process_echo_time(const struct bfddp_echo *echo);
 
-/** Packet read data+metadata. */
-struct bfd_packet_metadata {
-	/** Source address of the incoming packet. */
-	struct sockaddr_in6 bpm_src;
-	/** Destination address of the incoming packet. */
-	struct sockaddr_in6 bpm_dst;
-	/** Packet TTL value. */
-	uint8_t bpm_ttl;
-	/** Packet interface index. */
-	uint32_t bpm_ifindex;
-
-	/** Packet data buffer length. */
-	uint16_t bpm_datalen;
-	/** Packet data buffer. */
-	uint8_t bpm_data[4096];
-};
+/**
+ * Receive a BFD control packet off the socket.
+ *
+ * \param sock the BFD UDP listening socket.
+ */
+void bfd_recv_control_packet(int sock);
 
 /**
  * Implement 'RFC 5880 Section 6.8.6. Reception of BFD Control Packets'
  * processing. This routine will call the session state machine function.
  *
- * \param sock the BFD UDP listening socket.
+ * \param bpm Pointer to the BFD control packet metadata
  */
-void bfd_recv_control_packet(int sock);
+void
+bfd_process_control_packet(struct bfd_packet_metadata *bpm);
 
 /** BFD packet sending callback implementation. */
 ssize_t bfd_tx_control_cb(struct bfd_session *bs, void *arg,
@@ -356,14 +347,6 @@ uint32_t bfd_session_random(void);
  * Generate a locally unique discriminator.
  */
 uint32_t bfd_session_gen_discriminator(void);
-
-/**
- * Set the state of the BFD session state machine.
- *
- * \param bs the BFD session.
- * \param state the new state
- */
-void bfd_session_set_state(struct bfd_session *bs, enum bfd_state_value state);
 
 LIBBFDDP_END_DECLS
 

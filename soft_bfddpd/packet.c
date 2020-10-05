@@ -35,6 +35,7 @@
 #include "bfddp.h"
 #include "bfddp_packet.h"
 #include "bfddpd.h"
+#include "bfddp_extra.h"
 
 /* Error statistics */
 static struct bfd_error_statistics error_stats;
@@ -256,22 +257,15 @@ bfd_session_extra_check(const struct bfd_session *bs,
 }
 
 void
-bfd_recv_control_packet(int sock)
+bfd_process_control_packet(struct bfd_packet_metadata *bpm)
 {
 	struct bfddp_control_packet *bcp;
 	struct bfd_session *bs;
-	int plen;
 	enum bfddp_packet_validation bpv;
 	enum bfddp_packet_validation_extra bpve;
-	struct bfd_packet_metadata bpm = {};
 
-	plen = bfd_recv_packet(sock, &bpm);
-	/* Handle failures. */
-	if (plen <= 0)
-		return;
-
-	bcp = (struct bfddp_control_packet *)bpm.bpm_data;
-	bpv = bfddp_session_validate_packet(bcp, (size_t)plen);
+	bcp = (struct bfddp_control_packet *)bpm->bpm_data;
+	bpv = bfddp_session_validate_packet(bcp, (size_t)bpm->bpm_datalen);
 	switch (bpv) {
 	case BPV_INVALID_LENGTH:
 		/* FALLTHROUGH */
@@ -303,7 +297,7 @@ bfd_recv_control_packet(int sock)
 	 * spoofing).
 	 */
 	if (bcp->remote_id == 0) {
-		bs = bfd_session_lookup_by_packet(&bpm);
+		bs = bfd_session_lookup_by_packet(bpm);
 		if (bs == NULL) {
 			plog("session not found");
 			error_stats.invalid_session_drops++;
@@ -318,7 +312,7 @@ bfd_recv_control_packet(int sock)
 		}
 
 		/* Make sure we are looking at the correct session. */
-		if (bfd_session_extra_check(bs, &bpm) == false) {
+		if (bfd_session_extra_check(bs, bpm) == false) {
 			plog("invalid session address");
 			error_stats.invalid_session_drops++;
 			return;
@@ -342,3 +336,19 @@ bfd_recv_control_packet(int sock)
 		break;
 	}
 }
+
+void
+bfd_recv_control_packet(int sock)
+{
+	int plen;
+	struct bfd_packet_metadata bpm = {};
+
+	plen = bfd_recv_packet(sock, &bpm);
+	/* Handle failures. */
+	if (plen <= 0)
+		return;
+
+	bfd_process_control_packet(&bpm);
+}
+
+

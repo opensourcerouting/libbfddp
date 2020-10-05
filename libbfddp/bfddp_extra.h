@@ -129,13 +129,13 @@ struct bfd_session {
 	/** Remote detection multiplier. */
 	uint8_t bs_rdmultiplier;
 
-	/** Session control packet input counter. */
-	uint64_t bs_crx_bytes;
 	/** Session control packet bytes input counter. */
+	uint64_t bs_crx_bytes;
+	/** Session control packet input counter. */
 	uint64_t bs_crx_packets;
-	/** Session control packet output counter. */
-	uint64_t bs_ctx_bytes;
 	/** Session control packet bytes output counter. */
+	uint64_t bs_ctx_bytes;
+	/** Session control packet output counter. */
 	uint64_t bs_ctx_packets;
 
 	/** Data plane context we belong to. */
@@ -143,6 +143,24 @@ struct bfd_session {
 
 	/** Implementation dependent data. */
 	void *bs_data;
+};
+
+
+/** Packet read data+metadata. */
+struct bfd_packet_metadata {
+	/** Source address of the incoming packet. */
+	struct sockaddr_in6 bpm_src;
+	/** Destination address of the incoming packet. */
+	struct sockaddr_in6 bpm_dst;
+	/** Packet TTL value. */
+	uint8_t bpm_ttl;
+	/** Packet interface index. */
+	uint32_t bpm_ifindex;
+
+	/** Packet data buffer length. */
+	uint16_t bpm_datalen;
+	/** Packet data buffer. */
+	uint8_t bpm_data[4096];
 };
 
 
@@ -268,6 +286,23 @@ typedef void (*bfddp_state_change_cb)(struct bfd_session *bs, void *arg,
 				      enum bfd_state_value ostate,
 				      enum bfd_state_value nstate);
 
+/**
+ * BFD session lookup by discrimiator callback: use it to lookup the session
+ * in your application.
+ *
+ * \param lid The local discriminator ID.
+ */
+typedef struct bfd_session *(*bfddp_session_lookup_cb)(uint32_t lid);
+
+/**
+ * BFD session lookup by packet callback: use it to lookup the session
+ * in your application.
+ *
+ * \param bpm The bfd packet data.
+ */
+typedef struct bfd_session *(*bfddp_session_lookup_by_packet_cb)(
+			const struct bfd_packet_metadata *bpm);
+
 /** The BFD data plane callbacks.  */
 struct bfddp_callbacks {
 	/** Optional callback. */
@@ -276,6 +311,10 @@ struct bfddp_callbacks {
 	bfddp_session_update_cb bc_session_update;
 	/** Optional callback. */
 	bfddp_session_free_cb bc_session_free;
+	/** Optional callback. */
+	bfddp_session_lookup_cb bc_session_lookup;
+	/** Optional callback. */
+	bfddp_session_lookup_by_packet_cb bc_session_lookup_by_packet;
 
 	/** Mandatory callback. */
 	bfddp_tx_control_cb bc_tx_control;
@@ -300,6 +339,7 @@ struct bfddp_callbacks {
  */
 void bfddp_initialize(struct bfddp_callbacks *bc);
 
+extern struct bfddp_callbacks bfddp_callbacks;
 
 /*
  * BFD implementation functions.

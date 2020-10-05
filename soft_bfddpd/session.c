@@ -355,7 +355,7 @@ bfd_session_state_change(struct bfd_session *bs,
 void
 bfd_session_init(void)
 {
-	struct bfddp_callbacks bfddp_callbacks = {
+	struct bfddp_callbacks bfd_callbacks = {
 		.bc_session_new = bfd_session_new,
 		.bc_session_update = bfd_session_update,
 		.bc_session_free = bfd_session_free,
@@ -368,7 +368,7 @@ bfd_session_init(void)
 	};
 
 	/* Register our callbacks. */
-	bfddp_initialize(&bfddp_callbacks);
+	bfddp_initialize(&bfd_callbacks);
 
 	/* Initialize our session data structure. */
 	RBT_INIT(bsessionst, &bsessionst);
@@ -393,7 +393,12 @@ bfd_session_lookup(uint32_t lid)
 	struct bfd_session_data *bsd;
 	struct bfd_session_data bsdk;
 	struct bfd_session bs;
+	struct bfd_session *pbs;
 
+	pbs = bfddp_callbacks.bc_session_lookup(lid);
+	if (pbs != NULL)
+		return pbs;
+	
 	bsdk.bsd_bs = &bs;
 	bs.bs_lid = lid;
 
@@ -410,6 +415,10 @@ bfd_session_lookup_by_packet(const struct bfd_packet_metadata *bpm)
 	struct sockaddr_in *sin;
 	struct bfd_session *bs;
 	struct bfd_session_data *bsd;
+
+	bs = bfddp_callbacks.bc_session_lookup_by_packet(bpm);
+	if (bs != NULL)
+		return bs;
 
 	RBT_FOREACH(bsd, bsessionst, &bsessionst) {
 		bs = bsd->bsd_bs;
