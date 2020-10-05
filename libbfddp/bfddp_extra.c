@@ -825,7 +825,7 @@ apply_jitter(uint32_t total, bool dm_one)
 			    % (dm_one ? (BFD_DM_ONE_MAX_JITTER + 1)
 				      : (BFD_DM_MAX_JITTER + 1)));
 
-	return total - (total * (jitter / 100));
+	return total - ((total * jitter) / 100);
 }
 
 uint32_t
