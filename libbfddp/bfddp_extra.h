@@ -137,6 +137,18 @@ struct bfd_session {
 	uint64_t bs_ctx_bytes;
 	/** Session control packet output counter. */
 	uint64_t bs_ctx_packets;
+	/** Number of times this session went UP */
+	uint64_t bs_up_count;
+	/** Number of times this session went DOWN */
+	uint64_t bs_down_count;
+	/** Session echo packet bytes input counter. */
+	uint64_t bs_erx_bytes;
+	/** Session echo packet input counter. */
+	uint64_t bs_erx_packets;
+	/** Session echo packet bytes output counter. */
+	uint64_t bs_etx_bytes;
+	/** Session echo packet output counter. */
+	uint64_t bs_etx_packets;
 
 	/** Data plane context we belong to. */
 	struct bfddp_ctx *bs_bctx;
@@ -301,7 +313,74 @@ typedef struct bfd_session *(*bfddp_session_lookup_cb)(uint32_t lid);
  * \param bpm The bfd packet data.
  */
 typedef struct bfd_session *(*bfddp_session_lookup_by_packet_cb)(
-			const struct bfd_packet_metadata *bpm);
+	const struct bfd_packet_metadata *bpm);
+
+/**
+ * BFD echo packet transmission callback. Implements the lower level
+ * details of sending the packet (e.g. using a socket or writing into hardware
+ * memory).
+ *
+ * \param bs the BFD session.
+ * \param arg application argument.
+ * \param bep the BFD echo packet ready to be sent.
+ *
+ * \returns `-1` or `0` on failure otherwise the number of bytes to account.
+ */
+typedef ssize_t (*bfddp_tx_echo_cb)(struct bfd_session *bs, void *arg,
+				    const struct bfddp_echo_packet *bcp);
+
+/**
+ * Add or update session echo packet transmission timer.
+ *
+ * This is called when the BFD protocol state machine requires the packet to be
+ * transmitted and start a transmission timer. It will only be called again to
+ * update the transmission timers to a new negotiated interval.
+ *
+ * The packet sending and retriggering of the timer must be done by the
+ * application since the library has no knowledge about timers.
+ *
+ * \param bs the BFD session.
+ * \param arg application argument.
+ */
+typedef void (*bfddp_tx_echo_update_cb)(struct bfd_session *bs, void *arg);
+
+/**
+ * Stop session echo packet transmission timer.
+ *
+ * This is called when the BFD protocol state machine wants to stop
+ * transmitting new echo packets.
+ *
+ * \param bs the BFD session.
+ * \param arg application argument.
+ */
+typedef void (*bfddp_tx_echo_stop_cb)(struct bfd_session *bs, void *arg);
+
+/**
+ * Add or update session receive echo packet timer.
+ *
+ * This is called every time the state machine wants to know if an echo
+ * packet timeout will expire. This function will be called often, basically
+ * every time the application receives a BFD echo packet with
+ * `bfddp_session_rx_echo_packet`.
+ *
+ * The application must call `bfddp_session_echo_rx_timeout` if the timer
+ * expired.
+ *
+ * \param bs the BFD session.
+ * \param arg application argument.
+ */
+typedef void (*bfddp_rx_echo_update_cb)(struct bfd_session *bs, void *arg);
+
+/**
+ * Stop session receive echo packet timer.
+ *
+ * This is called when the BFD protocol state machine wants to stop receiving
+ * `bfddp_session_echo_rx_timeout` notifications.
+ *
+ * \param bs the BFD session.
+ * \param arg application argument.
+ */
+typedef void (*bfddp_rx_echo_stop_cb)(struct bfd_session *bs, void *arg);
 
 /** The BFD data plane callbacks.  */
 struct bfddp_callbacks {
@@ -330,6 +409,17 @@ struct bfddp_callbacks {
 
 	/** Optional callback. */
 	bfddp_state_change_cb bc_state_change;
+
+	/** Mandatory callback. */
+	bfddp_tx_echo_cb bc_tx_echo;
+	/** Mandatory callback. */
+	bfddp_tx_echo_update_cb bc_tx_echo_update;
+	/** Mandatory callback. */
+	bfddp_tx_echo_stop_cb bc_tx_echo_stop;
+	/** Mandatory callback. */
+	bfddp_rx_echo_update_cb bc_rx_echo_update;
+	/** Mandatory callback. */
+	bfddp_rx_echo_stop_cb bc_rx_echo_stop;
 };
 
 /**
@@ -407,6 +497,36 @@ ssize_t bfddp_send_control_packet(struct bfd_session *bs, void *arg);
 void bfddp_session_rx_timeout(struct bfd_session *bs, void *arg);
 
 /**
+ * Fill the BFD echo packet with the information present in the session data
+ * structure.
+ *
+ * \param bs the BFD session.
+ * \param bep the echo packet buffer.
+ */
+void bfddp_fill_echo_packet(const struct bfd_session *bs,
+			    struct bfddp_echo_packet *bep);
+
+/**
+ * Sends an echo packet using the session current state for generating
+ * the packet. Packet modifications and others may be done before sending
+ * the packet with the `bfddp_tx_control` callback.
+ *
+ * \param bs the BFD session.
+ * \param arg application argument.
+ *
+ * \returns the callback return value.
+ */
+ssize_t bfddp_send_echo_packet(struct bfd_session *bs, void *arg);
+
+/**
+ * Function that should be called when the session echo receive timer expires.
+ *
+ * \param bs the BFD session.
+ * \param arg application argument.
+ */
+void bfddp_session_rx_echo_timeout(struct bfd_session *bs, void *arg);
+
+/**
  * Call this function when you want to change the peer state.
  *
  * \param bs the BFD session to change state.
@@ -446,6 +566,18 @@ enum bfddp_packet_validation
 bfddp_session_validate_packet(const struct bfddp_control_packet *bcp,
 			      size_t bcplen);
 
+/**
+ * Validate the packet before attempting to access its fields.
+ *
+ * \param bep the packet binary.
+ * \param beplen the packet binary size.
+ *
+ * \returns one of the values of `bfddp_packet_validation`.
+ */
+enum bfddp_packet_validation
+bfddp_session_validate_echo_packet(const struct bfddp_echo_packet *bep,
+				   size_t beplen);
+
 /** BFD control packet session validation results. */
 enum bfddp_packet_validation_extra {
 	/** Everything is fine. */
@@ -473,6 +605,16 @@ enum bfddp_packet_validation_extra
 bfddp_session_rx_packet(struct bfd_session *bs, void *arg,
 			const struct bfddp_control_packet *bcp);
 
+/**
+ * Function that should be called when the session receives an echo packet.
+ *
+ * \param bs the BFD session.
+ * \param arg application argument.
+ * \param bep the BFD echo packet.
+ */
+void bfddp_session_rx_echo_packet(struct bfd_session *bs, void *arg,
+				  __attribute__((unused))
+				  const struct bfddp_echo_packet *bep);
 
 /*
  * Control plane helper functions.
@@ -534,6 +676,27 @@ size_t bfddp_session_reply_counters(struct bfddp_ctx *bctx, uint16_t id,
  */
 uint32_t bfddp_session_next_control_tx_interval(struct bfd_session *bs,
 						bool add_jitter);
+
+/**
+ * Generate next echo receive expiration interval timeout.
+ *
+ * \param bs the BFD session to get the negotiated intervals.
+ *
+ * \returns interval until next receive expiration in microseconds.
+ */
+uint32_t bfddp_session_next_echo_rx_interval(struct bfd_session *bs);
+
+/**
+ * Generate next echo send interval timeout.
+ *
+ * \param bs the BFD session to get the negotiated intervals.
+ * \param add_jitter apply jitter to the calculated interval (usually this
+ * is required to avoid sessions packet synchronization).
+ *
+ * \returns interval until next transmission in microseconds.
+ */
+uint32_t bfddp_session_next_echo_tx_interval(struct bfd_session *bs,
+					     bool add_jitter);
 
 /**
  * Generate next receive expiration interval timeout.

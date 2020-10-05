@@ -417,4 +417,26 @@ struct bfddp_message {
 	} data;
 };
 
+/**
+ * BFD echo packet.
+ *
+ * As defined in 'RFC 5880 Section 5 BFD Echo Packet Format
+ * The payload of a BFD Echo packet is a local matter, since only the
+ * sending system ever processes the content.  The only requirement is
+ * that sufficient information is included to demultiplex the received
+ * packet to the correct BFD session after it is looped back to the
+ * sender.  The contents are otherwise outside the scope of this
+ * specification.
+ */
+struct bfddp_echo_packet {
+	/** BFD version */
+	uint8_t version;
+	/** Length of data */
+	uint8_t length;
+	/** Reserved */
+	uint16_t reserved1;
+	/** Our discriminator. */
+	uint32_t local_id;
+};
+
 #endif /* BFD_DP_PACKET_H */

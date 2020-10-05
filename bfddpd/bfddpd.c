@@ -261,8 +261,8 @@ bfddp_process_echo_time(const struct bfddp_echo *echo)
 	dpt_total = (uint64_t)((tv.tv_sec * 1000000) + tv.tv_usec);
 
 	bfddp_log("echo-reply: BFD process time was %" PRIu64 " microseconds. "
-			  "Packet total processing time was %" PRIu64 " microseconds\n",
-			  bfdt - dpt, dpt_total - dpt);
+	          "Packet total processing time was %" PRIu64 " microseconds\n",
+	          bfdt - dpt, dpt_total - dpt);
 }
 
 /*
@@ -386,10 +386,10 @@ bfddp_main(const struct sockaddr *sa, socklen_t salen)
 				/* Unrecoverable error. */
 				if (rv == -1)
 					bfddp_err(1, "%s: bfddp_is_connected",
-							  __func__);
+					          __func__);
 
 				bfddp_log("%s: bfddp_is_connecting: running",
-						  __func__);
+				          __func__);
 				/* We are still not connected. */
 				continue;
 			}
@@ -406,7 +406,7 @@ bfddp_main(const struct sockaddr *sa, socklen_t salen)
 
 				/* Connection closed. */
 				bfddp_log("%s: bfddp_write: closed connection\n",
-				       __func__);
+				          __func__);
 				exit(1);
 			}
 			if (rv > 0)
@@ -424,7 +424,7 @@ bfddp_main(const struct sockaddr *sa, socklen_t salen)
 
 				/* Connection closed. */
 				bfddp_log("%s: bfddp_read: closed connection\n",
-				       __func__);
+				          __func__);
 				exit(1);
 			}
 			if (rv > 0)

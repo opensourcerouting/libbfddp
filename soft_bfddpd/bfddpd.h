@@ -248,12 +248,30 @@ void bfd_recv_control_packet(int sock);
  *
  * \param bpm Pointer to the BFD control packet metadata
  */
-void
-bfd_process_control_packet(struct bfd_packet_metadata *bpm);
+void bfd_process_control_packet(struct bfd_packet_metadata *bpm);
 
 /** BFD packet sending callback implementation. */
 ssize_t bfd_tx_control_cb(struct bfd_session *bs, void *arg,
 			  const struct bfddp_control_packet *bcp);
+
+/**
+ * Receive a BFD echo packet off the socket.
+ *
+ * \param sock the BFD UDP listening socket.
+ */
+void bfd_recv_echo_packet(int sock);
+
+/**
+ * Implement 'RFC 5880 Section 6.8.8. Reception of BFD Echo Packets'
+ * processing.
+ *
+ * \param bpm Pointer to the BFD echo packet metadata
+ */
+void bfd_process_echo_packet(struct bfd_packet_metadata *bpm);
+
+/** BFD echo packet sending callback implementation. */
+ssize_t bfd_tx_echo_cb(struct bfd_session *bs, void *arg,
+		       const struct bfddp_echo_packet *bep);
 
 /*
  * session.c
@@ -287,6 +305,11 @@ struct bfd_session_data {
 	struct timer_ctx *bsd_txev;
 	/** BFD Control packet receive timeout event. */
 	struct timer_ctx *bsd_rxev;
+
+	/** BFD Echo packet transmission timeout event. */
+	struct timer_ctx *bsd_echo_txev;
+	/** BFD Echo packet receive timeout event. */
+	struct timer_ctx *bsd_echo_rxev;
 
 	/** Session socket. */
 	int bsd_sock;

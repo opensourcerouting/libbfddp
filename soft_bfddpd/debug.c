@@ -97,10 +97,10 @@ bfd_session_debug(const struct bfd_session *bs, const char *fmt, ...)
 
 	if (bs->bs_ifindex)
 		bfddp_log("[%s %s:%d(%s|%d)->%s:%d] %s\n", mode, sbuf, sport,
-		       bs->bs_ifname, bs->bs_ifindex, dbuf, dport, msg);
+		          bs->bs_ifname, bs->bs_ifindex, dbuf, dport, msg);
 	else
 		bfddp_log("[%s %s:%d->%s:%d] %s\n", mode, sbuf, sport, dbuf, dport,
-		       msg);
+		          msg);
 }
 
 void

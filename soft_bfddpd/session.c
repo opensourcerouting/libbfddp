@@ -46,6 +46,7 @@ RBT_PROTOTYPE(bsessionst, bfd_session_data, entry, bsessions_cmp);
 RBT_GENERATE(bsessionst, bfd_session_data, entry, bsessions_cmp);
 
 static void bfd_session_update_control_tx(struct bfd_session *bs, void *arg);
+static void bfd_session_update_echo_tx(struct bfd_session *bs, void *arg);
 
 /*
  * Helper functions.
@@ -348,6 +349,84 @@ bfd_session_state_change(struct bfd_session *bs,
 	bfd_session_dump(bs);
 }
 
+static void
+bfd_session_echo_tx_timeout(__attribute__((unused)) struct events_ctx *ec,
+			    void *arg)
+{
+	bfd_session_update_echo_tx(arg, NULL);
+}
+
+static void
+bfd_session_update_echo_tx(struct bfd_session *bs,
+			   __attribute__((unused)) void *arg)
+{
+	struct bfd_session_data *bsd = bs->bs_data;
+
+	bfddp_send_echo_packet(bs, arg);
+
+	if (bsd->bsd_echo_txev)
+		bsd->bsd_echo_txev = events_ctx_update_timer(
+			bsd->bsd_ec, bsd->bsd_echo_txev,
+			bfddp_session_next_echo_tx_interval(bs, true) / 1000,
+			bfd_session_echo_tx_timeout, bs);
+	else {
+		bsd->bsd_echo_txev = events_ctx_add_timer(
+			bsd->bsd_ec,
+			bfddp_session_next_echo_tx_interval(bs, true) / 1000,
+			bfd_session_echo_tx_timeout, bs);
+		events_ctx_keep_timer(bsd->bsd_echo_txev);
+	}
+}
+
+static void
+bfd_session_echo_rx_timeout(__attribute__((unused)) struct events_ctx *ec,
+			    void *arg)
+{
+	struct bfd_session *bs = arg;
+
+	bfddp_session_rx_echo_timeout(bs, arg);
+
+	bfd_session_debug(bs, "echo packet receive timeout");
+}
+
+static void
+bfd_session_stop_echo_tx(struct bfd_session *bs,
+			 __attribute__((unused)) void *arg)
+{
+	struct bfd_session_data *bsd = bs->bs_data;
+
+	events_ctx_del_timer(bsd->bsd_ec, &bsd->bsd_echo_txev);
+}
+
+static void
+bfd_session_update_echo_rx(struct bfd_session *bs,
+			   __attribute__((unused)) void *arg)
+{
+	struct bfd_session_data *bsd = bs->bs_data;
+
+	if (bsd->bsd_echo_rxev)
+		bsd->bsd_echo_rxev = events_ctx_update_timer(
+			bsd->bsd_ec, bsd->bsd_echo_rxev,
+			bfddp_session_next_echo_rx_interval(bs) / 1000,
+			bfd_session_echo_rx_timeout, bs);
+	else {
+		bsd->bsd_echo_rxev = events_ctx_add_timer(
+			bsd->bsd_ec,
+			bfddp_session_next_echo_rx_interval(bs) / 1000,
+			bfd_session_echo_rx_timeout, bs);
+		events_ctx_keep_timer(bsd->bsd_echo_rxev);
+	}
+}
+
+static void
+bfd_session_stop_echo_rx(struct bfd_session *bs,
+			 __attribute__((unused)) void *arg)
+{
+	struct bfd_session_data *bsd = bs->bs_data;
+
+	events_ctx_del_timer(bsd->bsd_ec, &bsd->bsd_echo_rxev);
+}
+
 
 /*
  * Public API.
@@ -365,6 +444,11 @@ bfd_session_init(void)
 		.bc_rx_control_update = bfd_session_update_control_rx,
 		.bc_rx_control_stop = bfd_session_stop_control_rx,
 		.bc_state_change = bfd_session_state_change,
+		.bc_tx_echo = bfd_tx_echo_cb,
+		.bc_tx_echo_update = bfd_session_update_echo_tx,
+		.bc_tx_echo_stop = bfd_session_stop_echo_tx,
+		.bc_rx_echo_update = bfd_session_update_echo_rx,
+		.bc_rx_echo_stop = bfd_session_stop_echo_rx,
 	};
 
 	/* Register our callbacks. */
@@ -398,7 +482,7 @@ bfd_session_lookup(uint32_t lid)
 	pbs = bfddp_callbacks.bc_session_lookup(lid);
 	if (pbs != NULL)
 		return pbs;
-	
+
 	bsdk.bsd_bs = &bs;
 	bs.bs_lid = lid;
 
