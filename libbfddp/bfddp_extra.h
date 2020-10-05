@@ -38,6 +38,8 @@
 #include "bfddp.h"
 #include "bfddp_packet.h"
 
+LIBBFDDP_BEGIN_DECLS
+
 /** The BFD session structure for holding information. */
 struct bfd_session {
 	/** Peer multiple hop indicator. */
@@ -501,5 +503,7 @@ uint32_t bfddp_session_next_control_tx_interval(struct bfd_session *bs,
  * \returns interval until next receive expiration in microseconds.
  */
 uint32_t bfddp_session_next_control_rx_interval(struct bfd_session *bs);
+
+LIBBFDDP_END_DECLS
 
 #endif /* BFDDP_EXTRA_H */

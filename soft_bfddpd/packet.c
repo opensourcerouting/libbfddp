@@ -55,9 +55,9 @@ bfddp_process_echo_time(const struct bfddp_echo *echo)
 	/* Calculate total time taken until here. */
 	dpt_total = (uint64_t)((tv.tv_sec * 1000000) + tv.tv_usec);
 
-	printf("echo-reply: BFD process time was %" PRIu64 " microseconds. "
-	       "Packet total processing time was %" PRIu64 " microseconds\n",
-	       bfdt - dpt, dpt_total - dpt);
+	bfddp_log("echo-reply: BFD process time was %" PRIu64 " microseconds. "
+			  "Packet total processing time was %" PRIu64 " microseconds\n",
+			  bfdt - dpt, dpt_total - dpt);
 }
 
 /*

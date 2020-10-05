@@ -96,10 +96,10 @@ bfd_session_debug(const struct bfd_session *bs, const char *fmt, ...)
 	va_end(vl);
 
 	if (bs->bs_ifindex)
-		printf("[%s %s:%d(%s|%d)->%s:%d] %s\n", mode, sbuf, sport,
+		bfddp_log("[%s %s:%d(%s|%d)->%s:%d] %s\n", mode, sbuf, sport,
 		       bs->bs_ifname, bs->bs_ifindex, dbuf, dport, msg);
 	else
-		printf("[%s %s:%d->%s:%d] %s\n", mode, sbuf, sport, dbuf, dport,
+		bfddp_log("[%s %s:%d->%s:%d] %s\n", mode, sbuf, sport, dbuf, dport,
 		       msg);
 }
 

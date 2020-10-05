@@ -28,9 +28,11 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 
+#include <err.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdbool.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -57,6 +59,18 @@ struct bfddp_buf {
 	/** Packet position in buffer. */
 	size_t packet;
 };
+
+/** Default "err" logging function. */
+void (*bfddp_err)(int err_val, const char *_format, ...) = err;
+
+/** Default "errx" logging function. */
+void (*bfddp_errx)(int err_val, const char *_format, ...) = errx;
+
+/** Default "warn" logging function. */
+void (*bfddp_warn)(const char *_format, ...) = warn;
+
+/** Default logging function. */
+int (*bfddp_log)(const char *_format, ...) = printf;
 
 /**
  * BFD data plane context for dealing with socket.
@@ -506,4 +520,23 @@ bfddp_write_pending(struct bfddp_ctx *bctx)
 	struct bfddp_buf *buf = &bctx->outbuf;
 
 	return buf->position - buf->packet;
+}
+
+void
+bfddp_logging_init(struct bfddp_log *_this)
+{
+	if (_this == NULL)
+		return;
+
+	if (_this->err_log != NULL)
+		bfddp_err = _this->err_log;
+
+	if (_this->errx_log != NULL)
+		bfddp_errx = _this->errx_log;
+
+	if (_this->warn_log != NULL)
+		bfddp_warn = _this->warn_log;
+
+	if (_this->log != NULL)
+		bfddp_log = _this->log;
 }

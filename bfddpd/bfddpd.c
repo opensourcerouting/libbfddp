@@ -219,7 +219,7 @@ bfddp_send_echo_request(struct bfddp_ctx *bctx)
 		htobe64((uint64_t)((tv.tv_sec * 1000000) + tv.tv_usec));
 
 	if (bfddp_write_enqueue(bctx, &msg) == 0)
-		errx(1, "%s: bfddp_write_enqueue failed", __func__);
+		bfddp_errx(1, "%s: bfddp_write_enqueue failed", __func__);
 }
 
 static void
@@ -241,7 +241,7 @@ bfddp_send_echo_reply(struct bfddp_ctx *bctx, uint64_t bfdd_time)
 	msg.data.echo.bfdd_time = bfdd_time;
 
 	if (bfddp_write_enqueue(bctx, &msg) == 0)
-		errx(1, "%s: bfddp_write_enqueue failed", __func__);
+		bfddp_errx(1, "%s: bfddp_write_enqueue failed", __func__);
 }
 
 static void
@@ -260,9 +260,9 @@ bfddp_process_echo_time(const struct bfddp_echo *echo)
 	/* Calculate total time taken until here. */
 	dpt_total = (uint64_t)((tv.tv_sec * 1000000) + tv.tv_usec);
 
-	printf("echo-reply: BFD process time was %" PRIu64 " microseconds. "
-	       "Packet total processing time was %" PRIu64 " microseconds\n",
-	       bfdt - dpt, dpt_total - dpt);
+	bfddp_log("echo-reply: BFD process time was %" PRIu64 " microseconds. "
+			  "Packet total processing time was %" PRIu64 " microseconds\n",
+			  bfdt - dpt, dpt_total - dpt);
 }
 
 /*
@@ -294,7 +294,7 @@ main(int argc, char *argv[])
 	}
 
 	if (argc == 1)
-		errx(1, "BFD HAL listening socket address missing");
+		bfddp_errx(1, "BFD HAL listening socket address missing");
 
 	/* Parse address. */
 	addrlen = sizeof(addr);
@@ -305,7 +305,7 @@ main(int argc, char *argv[])
 	sigaction(SIGTERM, &sa, NULL);
 	sigaction(SIGINT, &sa, NULL);
 
-	printf("start\n");
+	bfddp_log("start\n");
 
 	/* Run main function. */
 	bfddp_main(&addr.sa, addrlen);
@@ -327,11 +327,11 @@ bfddp_main(const struct sockaddr *sa, socklen_t salen)
 	/* Allocate memory. */
 	bctx = bfddp_new(0, 0);
 	if (bctx == NULL)
-		err(1, "%s: bfddp_new", __func__);
+		bfddp_err(1, "%s: bfddp_new", __func__);
 
 	/* Connect to BFD daemon. */
 	if (bfddp_connect(bctx, sa, salen) == -1)
-		err(1, "%s: bfddp_connect", __func__);
+		bfddp_err(1, "%s: bfddp_connect", __func__);
 
 	/*
 	 * `bfddp_connect` might be still running: if `bfddp_is_connected`
@@ -339,7 +339,7 @@ bfddp_main(const struct sockaddr *sa, socklen_t salen)
 	 */
 	rv = bfddp_is_connected(bctx);
 	if (rv == -1)
-		err(1, "%s: bfddp_is_connected", __func__);
+		bfddp_err(1, "%s: bfddp_is_connected", __func__);
 	else if (rv == 0)
 		pfs[0].events = POLLIN;
 	else
@@ -368,13 +368,13 @@ bfddp_main(const struct sockaddr *sa, socklen_t salen)
 			if (errno == EINTR)
 				continue;
 
-			err(1, "%s: poll", __func__);
+			bfddp_err(1, "%s: poll", __func__);
 			/* NOTREACHED */
 		}
 
 		/* Handle timeouts. */
 		if (rv == 0) {
-			printf("%s: timed out\n", __func__);
+			bfddp_log("%s: timed out\n", __func__);
 			continue;
 		}
 
@@ -385,11 +385,11 @@ bfddp_main(const struct sockaddr *sa, socklen_t salen)
 			if (rv != 0) {
 				/* Unrecoverable error. */
 				if (rv == -1)
-					err(1, "%s: bfddp_is_connected",
-					    __func__);
+					bfddp_err(1, "%s: bfddp_is_connected",
+							  __func__);
 
-				printf("%s: bfddp_is_connecting: running",
-				       __func__);
+				bfddp_log("%s: bfddp_is_connecting: running",
+						  __func__);
 				/* We are still not connected. */
 				continue;
 			}
@@ -402,15 +402,15 @@ bfddp_main(const struct sockaddr *sa, socklen_t salen)
 			if (rv == -1) {
 				/* Connection failed. */
 				if (errno != 0)
-					err(1, "%s: bfddp_write", __func__);
+					bfddp_err(1, "%s: bfddp_write", __func__);
 
 				/* Connection closed. */
-				printf("%s: bfddp_write: closed connection\n",
+				bfddp_log("%s: bfddp_write: closed connection\n",
 				       __func__);
 				exit(1);
 			}
 			if (rv > 0)
-				printf("=> Sent %zd bytes\n", rv);
+				bfddp_log("=> Sent %zd bytes\n", rv);
 		}
 
 		/* Handle descriptor read ready. */
@@ -420,15 +420,15 @@ bfddp_main(const struct sockaddr *sa, socklen_t salen)
 			if (rv == -1) {
 				/* Connection failed. */
 				if (errno != 0)
-					err(1, "%s: bfddp_read", __func__);
+					bfddp_err(1, "%s: bfddp_read", __func__);
 
 				/* Connection closed. */
-				printf("%s: bfddp_read: closed connection\n",
+				bfddp_log("%s: bfddp_read: closed connection\n",
 				       __func__);
 				exit(1);
 			}
 			if (rv > 0)
-				printf("<= Received %zd bytes\n", rv);
+				bfddp_log("<= Received %zd bytes\n", rv);
 
 			/* After reading the socket we process the messages. */
 			bfddp_handle_message(bctx);
@@ -462,22 +462,22 @@ bfddp_handle_message(struct bfddp_ctx *bctx)
 		bmt = ntohs(msg->header.type);
 		switch (bmt) {
 		case ECHO_REQUEST:
-			printf("echo-request: sending echo reply\n");
+			bfddp_log("echo-request: sending echo reply\n");
 			bfddp_send_echo_reply(bctx, msg->data.echo.bfdd_time);
 			break;
 		case ECHO_REPLY:
 			bfddp_process_echo_time(&msg->data.echo);
 			break;
 		case DP_ADD_SESSION:
-			printf("Received add-session message\n");
+			bfddp_log("Received add-session message\n");
 			/* TODO: implement hardware session (re)installation. */
 			break;
 		case DP_DELETE_SESSION:
-			printf("Received delete-session message\n");
+			bfddp_log("Received delete-session message\n");
 			/* TODO: implement hardware session removal. */
 			break;
 		case DP_REQUEST_SESSION_COUNTERS:
-			printf("Received request session counters\n");
+			bfddp_log("Received request session counters\n");
 			/* TODO: implement session counters sending. */
 			break;
 
@@ -485,11 +485,11 @@ bfddp_handle_message(struct bfddp_ctx *bctx)
 			/* FALLTHROUGH. */
 		case BFD_STATE_CHANGE:
 			/* XXX: we are not supposed to receive this message. */
-			printf("Received wrong state-change mesage\n");
+			bfddp_log("Received wrong state-change mesage\n");
 			break;
 
 		default:
-			printf("Unhandled message type %d\n", bmt);
+			bfddp_log("Unhandled message type %d\n", bmt);
 			break;
 		}
 	} while (msg != NULL);

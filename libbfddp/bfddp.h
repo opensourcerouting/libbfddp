@@ -45,6 +45,16 @@ struct bfddp_ctx
 #endif /* DOXYGEN_DOC */
 ;
 
+#ifdef __cplusplus
+#define LIBBFDDP_BEGIN_DECLS extern "C" {
+#define LIBBFDDP_END_DECLS }
+#else
+#define LIBBFDDP_BEGIN_DECLS
+#define LIBBFDDP_END_DECLS
+#endif //__cplusplus
+
+LIBBFDDP_BEGIN_DECLS
+
 /**
  * Allocates memory for the data plane context and I/O buffers.
  *
@@ -194,5 +204,37 @@ ssize_t bfddp_write(struct bfddp_ctx *bctx);
  * \returns `0` if output buffer is empty otherwise the number of bytes.
  */
 size_t bfddp_write_pending(struct bfddp_ctx *bctx);
+
+/** Logging abstraction layer definitions. */
+struct bfddp_log {
+	/** "err" logging function used by the library. */
+	void (*err_log)(int err_val, const char *_format, ...);
+
+	/** "errx" logging function used by the library. */
+	void (*errx_log)(int err_val, const char *_format, ...);
+
+	/** "warn" logging function used by the library. */
+	void (*warn_log)(const char *_format, ...);
+
+	/** general logging function used by the library. */
+	int (*log)(const char *_format, ...);
+};
+
+/** Initialize the general logging functions used by the library. */
+void bfddp_logging_init(struct bfddp_log *_this);
+
+/** General "err" logging function. */
+extern void (*bfddp_err)(int err_val, const char *_format, ...);
+
+/** General "errx" logging function. */
+extern void (*bfddp_errx)(int err_val, const char *_format, ...);
+
+/** General "warn" logging function. */
+extern void (*bfddp_warn)(const char *_format, ...);
+
+/** General logging function. */
+extern int (*bfddp_log)(const char *_format, ...);
+
+LIBBFDDP_END_DECLS
 
 #endif /* BFD_DP_H */

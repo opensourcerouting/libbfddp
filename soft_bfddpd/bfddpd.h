@@ -37,6 +37,8 @@
 
 #include "openbsd-tree.h"
 
+LIBBFDDP_BEGIN_DECLS
+
 /* Forward declarations. */
 struct bfd_session;
 
@@ -363,5 +365,6 @@ uint32_t bfd_session_gen_discriminator(void);
  */
 void bfd_session_set_state(struct bfd_session *bs, enum bfd_state_value state);
 
+LIBBFDDP_END_DECLS
 
 #endif /* _SOFT_BFDDP_H */
