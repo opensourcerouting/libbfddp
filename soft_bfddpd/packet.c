@@ -33,6 +33,7 @@
 #include <string.h>
 
 #include "bfddp.h"
+#include "bfddp_extra.h"
 #include "bfddp_packet.h"
 #include "bfddpd.h"
 
@@ -55,9 +56,9 @@ bfddp_process_echo_time(const struct bfddp_echo *echo)
 	/* Calculate total time taken until here. */
 	dpt_total = (uint64_t)((tv.tv_sec * 1000000) + tv.tv_usec);
 
-	printf("echo-reply: BFD process time was %" PRIu64 " microseconds. "
-	       "Packet total processing time was %" PRIu64 " microseconds\n",
-	       bfdt - dpt, dpt_total - dpt);
+	bfddp_log("echo-reply: BFD process time was %" PRIu64 " microseconds. "
+	          "Packet total processing time was %" PRIu64 " microseconds\n",
+	          bfdt - dpt, dpt_total - dpt);
 }
 
 /*
@@ -236,8 +237,8 @@ bfd_recv_packet(int sock, struct bfd_packet_metadata *bpm)
 }
 
 static bool
-bfd_session_extra_check(const struct bfd_session *bs,
-			const struct bfd_packet_metadata *bpm)
+bfd_session_check_dst(const struct bfd_session *bs,
+		      const struct bfd_packet_metadata *bpm)
 {
 	struct sockaddr_in *bsin;
 
@@ -255,23 +256,36 @@ bfd_session_extra_check(const struct bfd_session *bs,
 	return false;
 }
 
+static bool
+bfd_session_check_src(const struct bfd_session *bs,
+		      const struct bfd_packet_metadata *bpm)
+{
+	struct sockaddr_in *bsin;
+
+	switch (bpm->bpm_src.sin6_family) {
+	case AF_INET:
+		bsin = (struct sockaddr_in *)&bpm->bpm_src;
+		return bs->bs_src.bs_src_sin.sin_addr.s_addr
+		       == bsin->sin_addr.s_addr;
+
+	case AF_INET6:
+		return memcmp(&bs->bs_src, &bpm->bpm_src.sin6_addr,
+			      sizeof(bs->bs_src));
+	}
+
+	return false;
+}
+
 void
-bfd_recv_control_packet(int sock)
+bfd_process_control_packet(struct bfd_packet_metadata *bpm)
 {
 	struct bfddp_control_packet *bcp;
 	struct bfd_session *bs;
-	int plen;
 	enum bfddp_packet_validation bpv;
 	enum bfddp_packet_validation_extra bpve;
-	struct bfd_packet_metadata bpm = {};
 
-	plen = bfd_recv_packet(sock, &bpm);
-	/* Handle failures. */
-	if (plen <= 0)
-		return;
-
-	bcp = (struct bfddp_control_packet *)bpm.bpm_data;
-	bpv = bfddp_session_validate_packet(bcp, (size_t)plen);
+	bcp = (struct bfddp_control_packet *)bpm->bpm_data;
+	bpv = bfddp_session_validate_packet(bcp, (size_t)bpm->bpm_datalen);
 	switch (bpv) {
 	case BPV_INVALID_LENGTH:
 		/* FALLTHROUGH */
@@ -303,7 +317,7 @@ bfd_recv_control_packet(int sock)
 	 * spoofing).
 	 */
 	if (bcp->remote_id == 0) {
-		bs = bfd_session_lookup_by_packet(&bpm);
+		bs = bfd_session_lookup_by_packet(bpm);
 		if (bs == NULL) {
 			plog("session not found");
 			error_stats.invalid_session_drops++;
@@ -318,7 +332,7 @@ bfd_recv_control_packet(int sock)
 		}
 
 		/* Make sure we are looking at the correct session. */
-		if (bfd_session_extra_check(bs, &bpm) == false) {
+		if (bfd_session_check_dst(bs, bpm) == false) {
 			plog("invalid session address");
 			error_stats.invalid_session_drops++;
 			return;
@@ -341,4 +355,98 @@ bfd_recv_control_packet(int sock)
 		/* NOTHING */
 		break;
 	}
+}
+
+void
+bfd_recv_control_packet(int sock)
+{
+	int plen;
+	struct bfd_packet_metadata bpm = {};
+
+	plen = bfd_recv_packet(sock, &bpm);
+	/* Handle failures. */
+	if (plen <= 0)
+		return;
+
+	bfd_process_control_packet(&bpm);
+}
+
+/*
+ * BFD Protocol.
+ */
+ssize_t
+bfd_tx_echo_cb(struct bfd_session *bs, __attribute__((unused)) void *arg,
+	       const struct bfddp_echo_packet *bep)
+{
+	struct bfd_session_data *bsd = bs->bs_data;
+	socklen_t salen;
+	ssize_t rv;
+	struct sockaddr_in sin = {};
+	struct sockaddr_in6 sin6 = {};
+	struct sockaddr *s = NULL;
+
+	/* Send the echo to myself at the echo port */
+	if (bs->bs_src.bs_src_sa.sa_family == AF_INET) {
+		salen = sizeof(struct sockaddr_in);
+		sin = bs->bs_src.bs_src_sin;
+		sin.sin_port = htons(BFD_ECHO_PORT);
+		s = (struct sockaddr *)&sin;
+	} else {
+		salen = sizeof(struct sockaddr_in6);
+		sin6 = bs->bs_src.bs_src_sin6;
+		sin6.sin6_port = htons(BFD_ECHO_PORT);
+		s = (struct sockaddr *)&sin6;
+	}
+
+	rv = sendto(bsd->bsd_sock, bep, bep->length, 0, s, salen);
+	if (rv <= 0) {
+		plog("sendto failed: %s", strerror(errno));
+	}
+
+	return rv;
+}
+
+void
+bfd_process_echo_packet(struct bfd_packet_metadata *bpm)
+{
+	struct bfddp_echo_packet *bep;
+	struct bfd_session *bs;
+	enum bfddp_packet_validation bpv;
+
+	bep = (struct bfddp_echo_packet *)bpm->bpm_data;
+	bpv = bfddp_session_validate_echo_packet(bep, (size_t)bpm->bpm_datalen);
+	if (bpv != BPV_OK)
+		return;
+
+	/*
+	 * Lookup the session based on the local ID.
+	 */
+	bs = bfd_session_lookup(ntohl(bep->local_id));
+	if (bs == NULL) {
+		plog("session for ID %u not found", nthol(bep->local_id));
+		return;
+	}
+
+	/* Make sure we are looking at the correct session. */
+	if (bfd_session_check_src(bs, bpm) == false) {
+		plog("invalid session address");
+		return;
+	}
+
+	bfddp_session_rx_echo_packet(bs, NULL, bep);
+}
+
+void
+bfd_recv_echo_packet(int sock)
+{
+	ssize_t plen;
+	struct bfd_packet_metadata bpm = {};
+
+	plen = bfd_recv_packet(sock, &bpm);
+	/* Handle failures. */
+	if (plen <= 0)
+		return;
+
+	bpm.bpm_datalen = (uint16_t)plen;
+	bfd_process_echo_packet(&bpm);
 }

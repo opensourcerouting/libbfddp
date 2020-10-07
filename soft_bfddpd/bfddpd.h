@@ -37,6 +37,8 @@
 
 #include "openbsd-tree.h"
 
+LIBBFDDP_BEGIN_DECLS
+
 /* Forward declarations. */
 struct bfd_session;
 
@@ -233,34 +235,43 @@ void events_ctx_keep_timer(struct timer_ctx *tc);
 /* FRR protocol packets. */
 void bfddp_process_echo_time(const struct bfddp_echo *echo);
 
-/** Packet read data+metadata. */
-struct bfd_packet_metadata {
-	/** Source address of the incoming packet. */
-	struct sockaddr_in6 bpm_src;
-	/** Destination address of the incoming packet. */
-	struct sockaddr_in6 bpm_dst;
-	/** Packet TTL value. */
-	uint8_t bpm_ttl;
-	/** Packet interface index. */
-	uint32_t bpm_ifindex;
-
-	/** Packet data buffer length. */
-	uint16_t bpm_datalen;
-	/** Packet data buffer. */
-	uint8_t bpm_data[4096];
-};
-
 /**
- * Implement 'RFC 5880 Section 6.8.6. Reception of BFD Control Packets'
- * processing. This routine will call the session state machine function.
+ * Receive a BFD control packet off the socket.
  *
  * \param sock the BFD UDP listening socket.
  */
 void bfd_recv_control_packet(int sock);
 
+/**
+ * Implement 'RFC 5880 Section 6.8.6. Reception of BFD Control Packets'
+ * processing. This routine will call the session state machine function.
+ *
+ * \param bpm Pointer to the BFD control packet metadata
+ */
+void bfd_process_control_packet(struct bfd_packet_metadata *bpm);
+
 /** BFD packet sending callback implementation. */
 ssize_t bfd_tx_control_cb(struct bfd_session *bs, void *arg,
 			  const struct bfddp_control_packet *bcp);
+
+/**
+ * Receive a BFD echo packet off the socket.
+ *
+ * \param sock the BFD UDP listening socket.
+ */
+void bfd_recv_echo_packet(int sock);
+
+/**
+ * Implement 'RFC 5880 Section 6.8.8. Reception of BFD Echo Packets'
+ * processing.
+ *
+ * \param bpm Pointer to the BFD echo packet metadata
+ */
+void bfd_process_echo_packet(struct bfd_packet_metadata *bpm);
+
+/** BFD echo packet sending callback implementation. */
+ssize_t bfd_tx_echo_cb(struct bfd_session *bs, void *arg,
+		       const struct bfddp_echo_packet *bep);
 
 /*
  * session.c
@@ -294,6 +305,11 @@ struct bfd_session_data {
 	struct timer_ctx *bsd_txev;
 	/** BFD Control packet receive timeout event. */
 	struct timer_ctx *bsd_rxev;
+
+	/** BFD Echo packet transmission timeout event. */
+	struct timer_ctx *bsd_echo_txev;
+	/** BFD Echo packet receive timeout event. */
+	struct timer_ctx *bsd_echo_rxev;
 
 	/** Session socket. */
 	int bsd_sock;
@@ -355,13 +371,6 @@ uint32_t bfd_session_random(void);
  */
 uint32_t bfd_session_gen_discriminator(void);
 
-/**
- * Set the state of the BFD session state machine.
- *
- * \param bs the BFD session.
- * \param state the new state
- */
-void bfd_session_set_state(struct bfd_session *bs, enum bfd_state_value state);
-
+LIBBFDDP_END_DECLS
 
 #endif /* _SOFT_BFDDP_H */

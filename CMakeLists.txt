@@ -8,6 +8,17 @@ add_library(
   libbfddp/bfddp_extra.c
   )
 
+add_library(
+  vbfd
+  soft_bfddpd/debug.c
+  soft_bfddpd/events.c
+  soft_bfddpd/openbsd-tree.c
+  soft_bfddpd/packet.c
+  soft_bfddpd/session.c
+  )
+
+target_include_directories(vbfd PUBLIC libbfddp)
+
 add_executable(
   bfddpd
   bfddpd/bfddpd.c

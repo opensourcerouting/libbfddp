@@ -80,6 +80,19 @@ bfddp_session_state_change_dummy(
 {
 }
 
+static struct bfd_session *
+bfddp_session_lookup_dummy(__attribute__((unused)) uint32_t lid)
+{
+	return NULL;
+}
+
+static struct bfd_session *
+bfddp_session_lookup_by_packet_dummy(__attribute__((unused))
+				     const struct bfd_packet_metadata *bpm)
+{
+	return NULL;
+}
+
 /* Our selected BFD integration callbacks. */
 struct bfddp_callbacks bfddp_callbacks;
 
@@ -101,12 +114,22 @@ bfddp_initialize(struct bfddp_callbacks *bc)
 	if (bfddp_callbacks.bc_state_change == NULL)
 		bfddp_callbacks.bc_state_change =
 			bfddp_session_state_change_dummy;
+	if (bfddp_callbacks.bc_session_lookup == NULL)
+		bfddp_callbacks.bc_session_lookup = bfddp_session_lookup_dummy;
+	if (bfddp_callbacks.bc_session_lookup_by_packet == NULL)
+		bfddp_callbacks.bc_session_lookup_by_packet =
+			bfddp_session_lookup_by_packet_dummy;
 
 	CALLBACK_CHECK(bc_tx_control);
 	CALLBACK_CHECK(bc_tx_control_update);
 	CALLBACK_CHECK(bc_tx_control_stop);
 	CALLBACK_CHECK(bc_rx_control_update);
 	CALLBACK_CHECK(bc_rx_control_stop);
+	CALLBACK_CHECK(bc_tx_echo);
+	CALLBACK_CHECK(bc_tx_echo_update);
+	CALLBACK_CHECK(bc_tx_echo_stop);
+	CALLBACK_CHECK(bc_rx_echo_update);
+	CALLBACK_CHECK(bc_rx_echo_stop);
 }
 
 /*
@@ -139,8 +162,10 @@ bfddp_session_update(struct bfd_session *bs, void *arg,
 	bool timers_changed = false;
 	struct in_addr *ia;
 	uint16_t port;
-	uint32_t min_rx, min_tx;
+	uint32_t min_rx, min_tx, min_erx;
 	uint32_t flags = ntohl(bds->flags);
+	bool echo_changed = false;
+	uint32_t echo;
 
 	/*
 	 * Load flags.
@@ -148,12 +173,16 @@ bfddp_session_update(struct bfd_session *bs, void *arg,
 	 * NOTE: normalize boolean values (e.g. `!!`) so packet build functions
 	 * can use it with shift (e.g. (multihop << X)).
 	 */
+	echo = bs->bs_echo;
 	bs->bs_admin_shutdown = !!(flags & SESSION_SHUTDOWN);
 	bs->bs_multihop = !!(flags & SESSION_MULTIHOP);
 	bs->bs_passive = !!(flags & SESSION_PASSIVE);
 	bs->bs_demand = !!(flags & SESSION_DEMAND);
 	bs->bs_cbit = !!(flags & SESSION_CBIT);
 	bs->bs_echo = !!(flags & SESSION_ECHO);
+
+	if (bs->bs_echo != echo)
+		echo_changed = true;
 
 	if (bs->bs_multihop)
 		port = htons(BFD_MULTI_HOP_PORT);
@@ -188,12 +217,13 @@ bfddp_session_update(struct bfd_session *bs, void *arg,
 	/* Load timers. */
 	min_tx = ntohl(bds->min_tx);
 	min_rx = ntohl(bds->min_rx);
-	if (bs->bs_tx != min_tx || bs->bs_rx != min_rx)
+	min_erx = ntohl(bds->min_echo_rx);
+	if (bs->bs_tx != min_tx || bs->bs_rx != min_rx || bs->bs_erx != min_erx)
 		timers_changed = true;
 
 	bs->bs_tx = min_tx;
 	bs->bs_rx = min_rx;
-	bs->bs_erx = ntohl(bds->min_echo_rx);
+	bs->bs_erx = min_erx;
 	bs->bs_hold = ntohl(bds->hold_time);
 	bs->bs_dmultiplier = bds->detect_mult;
 
@@ -214,6 +244,12 @@ bfddp_session_update(struct bfd_session *bs, void *arg,
 		/* Stop all timers. */
 		bfddp_callbacks.bc_rx_control_stop(bs, arg);
 		bfddp_callbacks.bc_tx_control_stop(bs, arg);
+
+		if (bs->bs_echo) {
+			bfddp_callbacks.bc_rx_echo_stop(bs, arg);
+			bfddp_callbacks.bc_tx_echo_stop(bs, arg);
+		}
+
 		return;
 	}
 
@@ -235,6 +271,12 @@ bfddp_session_update(struct bfd_session *bs, void *arg,
 	if (bs->bs_passive && bs->bs_state == STATE_DOWN) {
 		bfddp_callbacks.bc_rx_control_stop(bs, arg);
 		bfddp_callbacks.bc_tx_control_stop(bs, arg);
+
+		if (bs->bs_echo) {
+			bfddp_callbacks.bc_rx_echo_stop(bs, arg);
+			bfddp_callbacks.bc_tx_echo_stop(bs, arg);
+		}
+
 		return;
 	}
 
@@ -247,6 +289,19 @@ bfddp_session_update(struct bfd_session *bs, void *arg,
 
 	bfddp_callbacks.bc_rx_control_update(bs, arg);
 	bfddp_callbacks.bc_tx_control_update(bs, arg);
+
+	/*
+	 * Echo mode changed, so start or stop the echo timers
+	 */
+	if (echo_changed && bs->bs_state == STATE_UP) {
+		if (bs->bs_echo) {
+			bfddp_callbacks.bc_rx_echo_update(bs, arg);
+			bfddp_callbacks.bc_tx_echo_update(bs, arg);
+		} else {
+			bfddp_callbacks.bc_rx_echo_stop(bs, arg);
+			bfddp_callbacks.bc_tx_echo_stop(bs, arg);
+		}
+	}
 }
 
 struct bfd_session *
@@ -372,12 +427,19 @@ bfddp_session_rx_timeout(struct bfd_session *bs, void *arg)
 	/* Tell FRR's BFD daemon the session is down. */
 	bs->bs_state = STATE_DOWN;
 	bs->bs_diag = bs->bs_rdiag = DIAG_CONTROL_EXPIRED;
+	bs->bs_rid = 0;
 	bfddp_session_set_slowstart(bs);
 
 	/* Disable timers if configured for passive mode. */
 	if (bs->bs_passive) {
 		bfddp_callbacks.bc_rx_control_stop(bs, arg);
 		bfddp_callbacks.bc_tx_control_stop(bs, arg);
+	}
+
+	/* Disable echo timers. */
+	if (bs->bs_echo) {
+		bfddp_callbacks.bc_rx_echo_stop(bs, arg);
+		bfddp_callbacks.bc_tx_echo_stop(bs, arg);
 	}
 
 	/*
@@ -429,6 +491,9 @@ bfddp_session_sm_down(struct bfd_session *bs, void *arg,
 		/* Start polling. */
 		bs->bs_poll = true;
 
+		/* Immediately inform the peer */
+		bfddp_send_control_packet(bs, arg);
+
 		/* Notify state change. */
 		bfddp_send_session_state_change(bs);
 		break;
@@ -471,6 +536,9 @@ bfddp_session_sm_init(struct bfd_session *bs, void *arg,
 
 		/* Start polling. */
 		bs->bs_poll = true;
+
+		/* Immediately inform the peer */
+		bfddp_send_control_packet(bs, arg);
 
 		/* Notify state change. */
 		bfddp_send_session_state_change(bs);
@@ -550,6 +618,15 @@ bfddp_session_state_machine(struct bfd_session *bs, void *arg,
 	    && (ostate == STATE_UP && bs->bs_state == STATE_DOWN)) {
 		bfddp_callbacks.bc_rx_control_stop(bs, arg);
 		bfddp_callbacks.bc_tx_control_stop(bs, arg);
+	}
+
+	/*
+	 * If state changed from UP to DOWN and echo is enabled,
+	 * then we need to disable the echo RX/TX timers.
+	 */
+	if (ostate == STATE_UP && bs->bs_state == STATE_DOWN && bs->bs_echo) {
+		bfddp_callbacks.bc_rx_echo_stop(bs, arg);
+		bfddp_callbacks.bc_tx_echo_stop(bs, arg);
 	}
 
 	bfddp_callbacks.bc_state_change(bs, arg, ostate, bs->bs_state);
@@ -657,6 +734,13 @@ bfddp_session_rx_packet(struct bfd_session *bs, void *arg,
 		bs->bs_cur_rx = bs->bs_rx;
 		bs->bs_cur_erx = bs->bs_erx;
 
+		bfddp_callbacks.bc_tx_control_update(bs, arg);
+
+		if (bs->bs_echo) {
+			bfddp_callbacks.bc_tx_echo_update(bs, arg);
+			bfddp_callbacks.bc_rx_echo_update(bs, arg);
+		}
+
 		/* Tell control plane about timers change. */
 		bfddp_send_session_state_change(bs);
 	} else {
@@ -687,6 +771,8 @@ bfddp_session_rx_packet(struct bfd_session *bs, void *arg,
 	 * > bit set (see section 6.8.7).
 	 */
 	if (bcp->state_bits & STATE_POLL_BIT) {
+		/* Keep track of local poll value. */
+		bool poll = bs->bs_poll;
 		bs->bs_poll = false;
 		bs->bs_final = true;
 
@@ -694,6 +780,8 @@ bfddp_session_rx_packet(struct bfd_session *bs, void *arg,
 		bfddp_send_control_packet(bs, arg);
 
 		bs->bs_final = false;
+		/* Restore local poll value. */
+		bs->bs_poll = poll;
 	}
 
 	bfddp_session_state_machine(bs, arg, bs->bs_rstate);
@@ -825,7 +913,7 @@ apply_jitter(uint32_t total, bool dm_one)
 			    % (dm_one ? (BFD_DM_ONE_MAX_JITTER + 1)
 				      : (BFD_DM_MAX_JITTER + 1)));
 
-	return total - (total * (jitter / 100));
+	return total - ((total * jitter) / 100);
 }
 
 uint32_t
@@ -871,6 +959,148 @@ bfddp_session_next_control_rx_interval(struct bfd_session *bs)
 		next_to = bs->bs_cur_rx * bs->bs_rdmultiplier;
 	else
 		next_to = bs->bs_rtx * bs->bs_rdmultiplier;
+
+	return next_to;
+}
+
+enum bfddp_packet_validation
+bfddp_session_validate_echo_packet(const struct bfddp_echo_packet *bep,
+				   size_t beplen)
+{
+	/* Assert we have the received the whole packet. */
+	if (beplen < sizeof(*bep))
+		return BPV_PACKET_TOO_SMALL;
+
+	/* Check packet header length. */
+	if (bep->length < sizeof(*bep) || bep->length > beplen)
+		return BPV_INVALID_LENGTH;
+
+	/* Discard sessions using ID zero. */
+	if (bep->local_id == 0)
+		return BPV_ZERO_LOCAL_ID;
+
+	return BPV_OK;
+}
+
+void
+bfddp_session_rx_echo_packet(struct bfd_session *bs, void *arg,
+			     __attribute__((unused))
+			     const struct bfddp_echo_packet *bep)
+{
+	/* We received the expected echo packet, update the expiration timer. */
+	bfddp_callbacks.bc_rx_echo_update(bs, arg);
+
+	bs->bs_erx_packets++;
+}
+
+void
+bfddp_fill_echo_packet(const struct bfd_session *bs,
+		       struct bfddp_echo_packet *bep)
+{
+	memset(bep, 0, sizeof(*bep));
+	bep->version = BFD_PROTOCOL_VERSION;
+	bep->length = sizeof(*bep);
+	bep->local_id = htonl(bs->bs_lid);
+}
+
+ssize_t
+bfddp_send_echo_packet(struct bfd_session *bs, void *arg)
+{
+	struct bfddp_echo_packet bep;
+	ssize_t rv;
+
+	bfddp_fill_echo_packet(bs, &bep);
+
+	rv = bfddp_callbacks.bc_tx_echo(bs, arg, &bep);
+
+	/* Update session output data. */
+	if (rv > 0) {
+		bs->bs_etx_bytes += (size_t)rv;
+		bs->bs_etx_packets++;
+	}
+
+	return rv;
+}
+
+void
+bfddp_session_rx_echo_timeout(struct bfd_session *bs, void *arg)
+{
+	enum bfd_state_value pstate = bs->bs_state;
+
+	bfddp_session_reset_remote(bs);
+
+	/* Tell FRR's BFD daemon the session is down. */
+	bs->bs_state = STATE_DOWN;
+	bs->bs_diag = bs->bs_rdiag = DIAG_ECHO_FAILED;
+	bfddp_session_set_slowstart(bs);
+
+	bfddp_callbacks.bc_rx_echo_stop(bs, arg);
+	bfddp_callbacks.bc_tx_echo_stop(bs, arg);
+
+	/* Disable timers if configured for passive mode. */
+	if (bs->bs_passive) {
+		bfddp_callbacks.bc_rx_control_stop(bs, arg);
+		bfddp_callbacks.bc_tx_control_stop(bs, arg);
+	}
+
+	/*
+	 * Only send notification if state changed.
+	 *
+	 * This prevents a extra notification in case the remote peer
+	 * asked and ceased to send control packets earlier than expiration
+	 * timer.
+	 */
+	if (bs->bs_state != pstate)
+		bfddp_send_session_state_change(bs);
+
+	/* Notify application about state change. */
+	bfddp_callbacks.bc_state_change(bs, arg, pstate, bs->bs_state);
+}
+
+uint32_t
+bfddp_session_next_echo_tx_interval(struct bfd_session *bs, bool add_jitter)
+{
+	uint32_t selected_timer;
+
+	/*
+	 * RFC 5880 Section 6.8.9. Transmission of BFD Echo Packets
+	 *
+	 * The interval between transmitted BFD Echo packets MUST NOT be
+	 * less than the value advertised by the remote system in Required
+	 * Min Echo RX Interval, except as follows:
+	 *
+	 * A 25% jitter MAY be applied to the rate of transmission, such
+	 * that the actual interval MAY be between 75% and 100% of the
+	 * advertised value.  A single BFD Echo packet MAY be transmitted
+	 * between normally scheduled Echo transmission intervals.
+	 */
+	if (bs->bs_cur_erx > bs->bs_rerx)
+		selected_timer = bs->bs_cur_erx;
+	else
+		selected_timer = bs->bs_rerx;
+
+	if (add_jitter)
+		return apply_jitter(selected_timer, bs->bs_rdmultiplier == 1);
+
+	return selected_timer;
+}
+
+uint32_t
+bfddp_session_next_echo_rx_interval(struct bfd_session *bs)
+{
+	uint32_t next_to;
+
+	/*
+	 * RFC 5880 Section 6.8.9. Transmission of BFD Echo Packets
+	 *
+	 * The interval between transmitted BFD Echo packets MUST NOT be
+	 * less than the value advertised by the remote system in Required
+	 * Min Echo RX Interval
+	 */
+	if (bs->bs_cur_erx > bs->bs_rerx)
+		next_to = bs->bs_cur_erx * bs->bs_rdmultiplier;
+	else
+		next_to = bs->bs_rerx * bs->bs_rdmultiplier;
 
 	return next_to;
 }

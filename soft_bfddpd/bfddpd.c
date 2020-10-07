@@ -153,7 +153,7 @@ parse_address(const char *arg, struct sockaddr *sa, socklen_t *salen)
 
 	/* Check if type is strangely long. */
 	if (slen >= sizeof(type))
-		errx(1, "%s: type is too long: %zu characters", __func__, slen);
+		bfddp_errx(1, "%s: type is too long: %zu characters", __func__, slen);
 
 	memcpy(type, arg, slen);
 	type[slen] = 0;
@@ -193,13 +193,13 @@ parse_address(const char *arg, struct sockaddr *sa, socklen_t *salen)
 		/* Check for IPv6 enclosures '[]' */
 		sptr = &addr[0];
 		if (*sptr != '[')
-			errx(1, "%s: invalid IPv6 address: %s (try [::1])",
-			     __func__, addr);
+			bfddp_errx(1, "%s: invalid IPv6 address: %s (try [::1])",
+			           __func__, addr);
 
 		saux = strrchr(addr, ']');
 		if (saux == NULL)
-			errx(1, "%s: invalid IPv6 address: %s (try [::1])",
-			     __func__, addr);
+			bfddp_errx(1, "%s: invalid IPv6 address: %s (try [::1])",
+			           __func__, addr);
 
 		/* Consume the '[]:' part. */
 		slen = (size_t)(saux - sptr);
@@ -253,7 +253,7 @@ main(int argc, char *argv[])
 	}
 
 	if (argc == 1)
-		errx(1, "BFD HAL listening socket address missing");
+		bfddp_errx(1, "BFD HAL listening socket address missing");
 
 	/* Parse address. */
 	addrlen = sizeof(addr);
@@ -264,7 +264,7 @@ main(int argc, char *argv[])
 	sigaction(SIGTERM, &sa, NULL);
 	sigaction(SIGINT, &sa, NULL);
 
-	printf("start\n");
+	bfddp_log("start\n");
 
 	/* Run main function. */
 	bfddp_main(&addr.sa, addrlen);
@@ -279,6 +279,9 @@ static void bfddp_connect_event(struct events_ctx *ec, int fd, short revents,
 static int bfd_single_hop_socket(void);
 static void bfd_single_hop_recv(struct events_ctx *ec, int sock, short revents,
 			        void *arg);
+static int bfd_single_hop_echo_socket(void);
+static void bfd_single_hop_echo_recv(struct events_ctx *ec, int sock,
+				     short revents, void *arg);
 
 static void __attribute__((noreturn))
 bfddp_main(const struct sockaddr *sa, socklen_t salen)
@@ -286,30 +289,34 @@ bfddp_main(const struct sockaddr *sa, socklen_t salen)
 	struct bfddp_ctx *bctx;
 	struct events_ctx *ec;
 	int shbfd = bfd_single_hop_socket();
+	int shebfd = bfd_single_hop_echo_socket();
 
 	/* Create event handler. */
 	ec = events_ctx_new(64);
 	if (ec == NULL)
-		err(1, "%s: events_ctx_new", __func__);
+		bfddp_err(1, "%s: events_ctx_new", __func__);
 
 	/* Allocate memory. */
 	bctx = bfddp_new(0, 0);
 	if (bctx == NULL)
-		err(1, "%s: bfddp_new", __func__);
+		bfddp_err(1, "%s: bfddp_new", __func__);
 
 	/* Initialize BFD sessions handler. */
 	bfd_session_init();
 
 	/* Connect to BFD daemon. */
 	if (bfddp_connect(bctx, sa, salen) == -1)
-		err(1, "%s: bfddp_connect", __func__);
+		bfddp_err(1, "%s: bfddp_connect", __func__);
 
 	/* Ask for events context to notify us. */
 	events_ctx_add_fd(ec, bfddp_get_fd(bctx), POLLOUT, bfddp_connect_event,
 			  bctx);
 
-	/* Ask for events context to notify us. */
+	/* Ask for events context to notify us of BFD control events. */
 	events_ctx_add_fd(ec, shbfd, POLLIN, bfd_single_hop_recv, NULL);
+
+	/* Ask for events context to notify us of BFD echo events. */
+	events_ctx_add_fd(ec, shebfd, POLLIN, bfd_single_hop_echo_recv, NULL);
 
 	/* Main daemon loop. */
 	while (events_ctx_poll(ec) != -1) {
@@ -349,12 +356,12 @@ bfddp_connect_event(struct events_ctx *ec, int fd, short revents, void *arg)
 
 	/* Connection closed or failed. */
 	if (revents & (POLLHUP | POLLERR | POLLNVAL))
-		errx(1, "%s: connection closed", __func__);
+		bfddp_errx(1, "%s: connection closed", __func__);
 
 	rv = bfddp_is_connected(arg);
 	/* Handle fatal file descriptor errors: exit. */
 	if (rv == -1)
-		err(1, "%s: bfddp_is_connected", __func__);
+		bfddp_err(1, "%s: bfddp_is_connected", __func__);
 	/* Handle interruptions: ask for more writes. */
 	if (rv == 1) {
 		events_ctx_add_fd(ec, fd, POLLOUT, bfddp_connect_event, arg);
@@ -378,16 +385,16 @@ bfddp_write_event(struct bfddp_ctx *bctx)
 	if (rv == -1) {
 		/* Connection failed. */
 		if (errno != 0)
-			err(1, "%s: bfddp_write", __func__);
+			bfddp_err(1, "%s: bfddp_write", __func__);
 
 		/* Connection closed. */
-		printf("%s: bfddp_write: closed connection\n",
-		       __func__);
+		bfddp_log("%s: bfddp_write: closed connection\n",
+		          __func__);
 		is_terminating = true;
 		return;
 	}
 	if (rv > 0)
-		printf("=> Sent %zd bytes\n", rv);
+		bfddp_log("=> Sent %zd bytes\n", rv);
 }
 
 static void
@@ -400,16 +407,16 @@ bfddp_read_event(struct events_ctx *ec, struct bfddp_ctx *bctx)
 	if (rv == -1) {
 		/* Connection failed. */
 		if (errno != 0)
-			err(1, "%s: bfddp_read", __func__);
+			bfddp_err(1, "%s: bfddp_read", __func__);
 
 		/* Connection closed. */
-		printf("%s: bfddp_read: closed connection\n",
-		       __func__);
+		bfddp_log("%s: bfddp_read: closed connection\n",
+				  __func__);
 		is_terminating = true;
 		return;
 	}
 	if (rv > 0)
-		printf("<= Received %zd bytes\n", rv);
+		bfddp_log("<= Received %zd bytes\n", rv);
 
 	/* After reading the socket we process the messages. */
 	bfddp_handle_message(ec, bctx);
@@ -473,7 +480,7 @@ bfddp_handle_message(struct events_ctx *ec, struct bfddp_ctx *bctx)
 		bmt = ntohs(msg->header.type);
 		switch (bmt) {
 		case ECHO_REQUEST:
-			printf("echo-request: sending echo reply\n");
+			bfddp_log("echo-request: sending echo reply\n");
 			bfddp_send_echo_reply(bctx, msg->data.echo.bfdd_time);
 			break;
 		case ECHO_REPLY:
@@ -503,11 +510,11 @@ bfddp_handle_message(struct events_ctx *ec, struct bfddp_ctx *bctx)
 			/* FALLTHROUGH. */
 		case BFD_STATE_CHANGE:
 			/* XXX: we are not supposed to receive this message. */
-			printf("Received wrong state-change mesage\n");
+			bfddp_log("Received wrong state-change mesage\n");
 			break;
 
 		default:
-			printf("Unhandled message type %d\n", bmt);
+			bfddp_log("Unhandled message type %d\n", bmt);
 			break;
 		}
 	} while (msg != NULL);
@@ -521,13 +528,13 @@ bfd_single_hop_recv(__attribute__((unused)) struct events_ctx *ec, int sock,
 		    short revents, __attribute__((unused)) void *arg)
 {
 	if (revents & (POLLERR | POLLHUP | POLLNVAL))
-		errx(1, "poll returned bad value");
+		bfddp_errx(1, "poll returned bad value");
 
 	/* Handle incoming packet. */
 	bfd_recv_control_packet(sock);
 
 	/* Always read more. */
-	events_ctx_add_fd(ec, sock, POLLIN, bfd_single_hop_recv, NULL);
+	events_ctx_add_fd(ec, sock, POLLIN, bfd_single_hop_recv, arg);
 }
 
 static int
@@ -538,37 +545,96 @@ bfd_single_hop_socket(void)
 
 	sock = socket(AF_INET, SOCK_DGRAM, 0);
 	if (sock == -1)
-		err(1, "%s: socket", __func__);
+		bfddp_err(1, "%s: socket", __func__);
 
 	/* Set packet TTL. */
 	value = 255;
 	rv = setsockopt(sock, IPPROTO_IP, IP_TTL, &value, sizeof(value));
 	if (rv == -1)
-		err(1, "%s: setsockopt(IP_TTL)", __func__);
+		bfddp_err(1, "%s: setsockopt(IP_TTL)", __func__);
 
 	/* Receive the packet TTL information from `recvmsg`. */
 	value = 1;
 	rv = setsockopt(sock, IPPROTO_IP, IP_RECVTTL, &value, sizeof(value));
 	if (rv == -1)
-		err(1, "%s: setsockopt(IP_RECVTTL)", __func__);
+		bfddp_err(1, "%s: setsockopt(IP_RECVTTL)", __func__);
 
 	/* Receive the interface information from `recvmsg`. */
 	value = 1;
 	rv = setsockopt(sock, IPPROTO_IP, IP_PKTINFO, &value, sizeof(value));
 	if (rv == -1)
-		err(1, "%s: setsockopt(IP_PKTINFO)", __func__);
+		bfddp_err(1, "%s: setsockopt(IP_PKTINFO)", __func__);
 
 	/* Re use addr if someone else is using it. */
 	value = 1;
 	rv = setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &value, sizeof(value));
 	if (rv == -1)
-		err(1, "%s: setsockopt(SO_REUSEADDR)", __func__);
+		bfddp_err(1, "%s: setsockopt(SO_REUSEADDR)", __func__);
 
 	sin.sin_family = AF_INET;
 	sin.sin_addr.s_addr = htonl(INADDR_ANY);
 	sin.sin_port = htons(BFD_SINGLE_HOP_PORT);
 	if (bind(sock, (struct sockaddr *)&sin, sizeof(sin)) == -1)
-		err(1, "%s: bind", __func__);
+		bfddp_err(1, "%s: bind", __func__);
+
+	return sock;
+}
+
+static void
+bfd_single_hop_echo_recv(struct events_ctx *ec, int sock, short revents,
+			 void *arg)
+{
+	if (revents & (POLLERR | POLLHUP | POLLNVAL))
+		bfddp_errx(1, "poll returned bad value");
+
+	/* Handle incoming packet. */
+	bfd_recv_echo_packet(sock);
+
+	/* Always read more. */
+	events_ctx_add_fd(ec, sock, POLLIN, bfd_single_hop_echo_recv, arg);
+}
+
+static int
+bfd_single_hop_echo_socket(void)
+{
+	int rv, sock, value;
+	struct sockaddr_in sin;
+
+	memset(&sin, 0, sizeof(sin));
+
+	sock = socket(AF_INET, SOCK_DGRAM, 0);
+	if (sock == -1)
+		bfddp_err(1, "%s: socket", __func__);
+
+	/* Set packet TTL. */
+	value = 255;
+	rv = setsockopt(sock, IPPROTO_IP, IP_TTL, &value, sizeof(value));
+	if (rv == -1)
+		bfddp_err(1, "%s: setsockopt(IP_TTL)", __func__);
+
+	/* Receive the packet TTL information from `recvmsg`. */
+	value = 1;
+	rv = setsockopt(sock, IPPROTO_IP, IP_RECVTTL, &value, sizeof(value));
+	if (rv == -1)
+		bfddp_err(1, "%s: setsockopt(IP_RECVTTL)", __func__);
+
+	/* Receive the interface information from `recvmsg`. */
+	value = 1;
+	rv = setsockopt(sock, IPPROTO_IP, IP_PKTINFO, &value, sizeof(value));
+	if (rv == -1)
+		bfddp_err(1, "%s: setsockopt(IP_PKTINFO)", __func__);
+
+	/* Re use addr if someone else is using it. */
+	value = 1;
+	rv = setsockopt(sock, IPPROTO_IP, SO_REUSEADDR, &value, sizeof(value));
+	if (rv == -1)
+		bfddp_err(1, "%s: setsockopt(SO_REUSEADDR)", __func__);
+
+	sin.sin_family = AF_INET;
+	sin.sin_addr.s_addr = htonl(INADDR_ANY);
+	sin.sin_port = htons(BFD_ECHO_PORT);
+	if (bind(sock, (struct sockaddr *)&sin, sizeof(sin)) == -1)
+		bfddp_err(1, "%s: bind", __func__);
 
 	return sock;
 }
