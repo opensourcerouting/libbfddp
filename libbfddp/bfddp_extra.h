@@ -613,7 +613,6 @@ bfddp_session_rx_packet(struct bfd_session *bs, void *arg,
  * \param bep the BFD echo packet.
  */
 void bfddp_session_rx_echo_packet(struct bfd_session *bs, void *arg,
-				  __attribute__((unused))
 				  const struct bfddp_echo_packet *bep);
 
 /*

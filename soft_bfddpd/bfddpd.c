@@ -581,9 +581,8 @@ bfd_single_hop_socket(void)
 }
 
 static void
-bfd_single_hop_echo_recv(__attribute__((unused)) struct events_ctx *ec,
-			 int sock, short revents,
-			 __attribute__((unused)) void *arg)
+bfd_single_hop_echo_recv(struct events_ctx *ec, int sock, short revents,
+			 void *arg)
 {
 	if (revents & (POLLERR | POLLHUP | POLLNVAL))
 		bfddp_errx(1, "poll returned bad value");

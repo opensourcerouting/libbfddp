@@ -357,8 +357,7 @@ bfd_session_echo_tx_timeout(__attribute__((unused)) struct events_ctx *ec,
 }
 
 static void
-bfd_session_update_echo_tx(struct bfd_session *bs,
-			   __attribute__((unused)) void *arg)
+bfd_session_update_echo_tx(struct bfd_session *bs, void *arg)
 {
 	struct bfd_session_data *bsd = bs->bs_data;
 

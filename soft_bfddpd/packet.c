@@ -381,14 +381,24 @@ bfd_tx_echo_cb(struct bfd_session *bs, __attribute__((unused)) void *arg,
 	struct bfd_session_data *bsd = bs->bs_data;
 	socklen_t salen;
 	ssize_t rv;
+	struct sockaddr_in sin = {};
+	struct sockaddr_in6 sin6 = {};
+	struct sockaddr *s = NULL;
 
-	if (bs->bs_dst.bs_dst_sa.sa_family == AF_INET)
+	/* Send the echo to myself at the echo port */
+	if (bs->bs_src.bs_src_sa.sa_family == AF_INET) {
 		salen = sizeof(struct sockaddr_in);
-	else
+		sin = bs->bs_src.bs_src_sin;
+		sin.sin_port = htons(BFD_ECHO_PORT);
+		s = (struct sockaddr *)&sin;
+	} else {
 		salen = sizeof(struct sockaddr_in6);
+		sin6 = bs->bs_src.bs_src_sin6;
+		sin6.sin6_port = htons(BFD_ECHO_PORT);
+		s = (struct sockaddr *)&sin6;
+	}
 
-	rv = sendto(bsd->bsd_sock, bep, bep->length, 0, &bs->bs_dst.bs_dst_sa,
-		    salen);
+	rv = sendto(bsd->bsd_sock, bep, bep->length, 0, s, salen);
 	if (rv <= 0) {
 		plog("sendto failed: %s", strerror(errno));
 	}
