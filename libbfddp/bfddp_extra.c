@@ -990,7 +990,9 @@ bfddp_session_rx_echo_packet(struct bfd_session *bs, void *arg,
 	/* We received the expected echo packet, update the expiration timer. */
 	bfddp_callbacks.bc_rx_echo_update(bs, arg);
 
+	/* Update session input data. */
 	bs->bs_erx_packets++;
+	bs->bs_erx_bytes += sizeof(*bep);
 }
 
 void
