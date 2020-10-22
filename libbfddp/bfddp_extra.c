@@ -189,7 +189,7 @@ bfddp_session_update(struct bfd_session *bs, void *arg,
 	else
 		port = htons(BFD_SINGLE_HOP_PORT);
 
-	bs->bs_ipv4 = !(bds->flags & SESSION_IPV6);
+	bs->bs_ipv4 = !(flags & SESSION_IPV6);
 	if (bs->bs_ipv4) {
 		ia = (struct in_addr *)&bds->src;
 		bs->bs_src.bs_src_sin.sin_family = AF_INET;
