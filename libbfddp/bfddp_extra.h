@@ -316,6 +316,15 @@ typedef struct bfd_session *(*bfddp_session_lookup_by_packet_cb)(
 	const struct bfd_packet_metadata *bpm);
 
 /**
+ * BFD send state change: it is called every time the control plane must be
+ * notified of a session change.
+ *
+ * \param bs the BFD session.
+ */
+typedef size_t (*bfddp_send_session_state_change_cb)(
+	const struct bfd_session *bs);
+
+/**
  * BFD echo packet transmission callback. Implements the lower level
  * details of sending the packet (e.g. using a socket or writing into hardware
  * memory).
@@ -394,6 +403,8 @@ struct bfddp_callbacks {
 	bfddp_session_lookup_cb bc_session_lookup;
 	/** Optional callback. */
 	bfddp_session_lookup_by_packet_cb bc_session_lookup_by_packet;
+	/** Optional callback. */
+	bfddp_send_session_state_change_cb bc_send_session_state_change;
 
 	/** Mandatory callback. */
 	bfddp_tx_control_cb bc_tx_control;
