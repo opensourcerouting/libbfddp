@@ -119,6 +119,9 @@ bfddp_initialize(struct bfddp_callbacks *bc)
 	if (bfddp_callbacks.bc_session_lookup_by_packet == NULL)
 		bfddp_callbacks.bc_session_lookup_by_packet =
 			bfddp_session_lookup_by_packet_dummy;
+	if (bfddp_callbacks.bc_send_session_state_change == NULL)
+		bfddp_callbacks.bc_send_session_state_change =
+			bfddp_send_session_state_change;
 
 	CALLBACK_CHECK(bc_tx_control);
 	CALLBACK_CHECK(bc_tx_control_update);
@@ -163,6 +166,7 @@ bfddp_session_update(struct bfd_session *bs, void *arg,
 	struct in_addr *ia;
 	uint16_t port;
 	uint32_t min_rx, min_tx, min_erx;
+	uint8_t detect_mult;
 	uint32_t flags = ntohl(bds->flags);
 	bool echo_changed = false;
 	uint32_t echo;
@@ -218,14 +222,16 @@ bfddp_session_update(struct bfd_session *bs, void *arg,
 	min_tx = ntohl(bds->min_tx);
 	min_rx = ntohl(bds->min_rx);
 	min_erx = ntohl(bds->min_echo_rx);
-	if (bs->bs_tx != min_tx || bs->bs_rx != min_rx || bs->bs_erx != min_erx)
+	detect_mult = bds->detect_mult;
+	if (bs->bs_tx != min_tx || bs->bs_rx != min_rx || bs->bs_erx != min_erx
+	    || bs->bs_dmultiplier != detect_mult)
 		timers_changed = true;
 
 	bs->bs_tx = min_tx;
 	bs->bs_rx = min_rx;
 	bs->bs_erx = min_erx;
 	bs->bs_hold = ntohl(bds->hold_time);
-	bs->bs_dmultiplier = bds->detect_mult;
+	bs->bs_dmultiplier = detect_mult;
 
 	bs->bs_minttl = bds->ttl;
 	bs->bs_ifindex = ntohl(bds->ifindex);
@@ -450,7 +456,7 @@ bfddp_session_rx_timeout(struct bfd_session *bs, void *arg)
 	 * timer.
 	 */
 	if (bs->bs_state != pstate)
-		bfddp_send_session_state_change(bs);
+		bfddp_callbacks.bc_send_session_state_change(bs);
 
 	/* Notify application about state change. */
 	bfddp_callbacks.bc_state_change(bs, arg, pstate, bs->bs_state);
@@ -476,7 +482,7 @@ bfddp_session_sm_down(struct bfd_session *bs, void *arg,
 		bs->bs_state = STATE_INIT;
 
 		/* Notify state change. */
-		bfddp_send_session_state_change(bs);
+		bfddp_callbacks.bc_send_session_state_change(bs);
 
 		/*
 		 * If passive mode we must manually send packet (TX timer is
@@ -495,7 +501,7 @@ bfddp_session_sm_down(struct bfd_session *bs, void *arg,
 		bfddp_send_control_packet(bs, arg);
 
 		/* Notify state change. */
-		bfddp_send_session_state_change(bs);
+		bfddp_callbacks.bc_send_session_state_change(bs);
 		break;
 	case STATE_UP:
 		/* NOTHING: we haven't and the peer hasn't sent INIT yet. */
@@ -516,7 +522,7 @@ bfddp_session_sm_init(struct bfd_session *bs, void *arg,
 		bs->bs_state = STATE_DOWN;
 
 		/* Notify state change. */
-		bfddp_send_session_state_change(bs);
+		bfddp_callbacks.bc_send_session_state_change(bs);
 		break;
 	case STATE_DOWN:
 		/*
@@ -541,7 +547,7 @@ bfddp_session_sm_init(struct bfd_session *bs, void *arg,
 		bfddp_send_control_packet(bs, arg);
 
 		/* Notify state change. */
-		bfddp_send_session_state_change(bs);
+		bfddp_callbacks.bc_send_session_state_change(bs);
 		break;
 
 	default:
@@ -564,7 +570,7 @@ bfddp_session_sm_up(struct bfd_session *bs, __attribute__((unused)) void *arg,
 		/* Disable echo timers. */
 
 		/* Notify state change. */
-		bfddp_send_session_state_change(bs);
+		bfddp_callbacks.bc_send_session_state_change(bs);
 		break;
 	case STATE_INIT:
 		/* FALLTHROUGH. */
@@ -742,14 +748,14 @@ bfddp_session_rx_packet(struct bfd_session *bs, void *arg,
 		}
 
 		/* Tell control plane about timers change. */
-		bfddp_send_session_state_change(bs);
+		bfddp_callbacks.bc_send_session_state_change(bs);
 	} else {
 		if (timers_changed) {
 			/*
 			 * Notify control plane about new timers if this is not
 			 * the final event.
 			 */
-			bfddp_send_session_state_change(bs);
+			bfddp_callbacks.bc_send_session_state_change(bs);
 
 			/*
 			 * Update transmission timer to avoid session
@@ -1053,7 +1059,7 @@ bfddp_session_rx_echo_timeout(struct bfd_session *bs, void *arg)
 	 * timer.
 	 */
 	if (bs->bs_state != pstate)
-		bfddp_send_session_state_change(bs);
+		bfddp_callbacks.bc_send_session_state_change(bs);
 
 	/* Notify application about state change. */
 	bfddp_callbacks.bc_state_change(bs, arg, pstate, bs->bs_state);
