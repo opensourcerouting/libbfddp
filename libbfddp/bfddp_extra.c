@@ -431,9 +431,21 @@ bfddp_session_rx_timeout(struct bfd_session *bs, void *arg)
 	bfddp_session_reset_remote(bs);
 
 	/* Tell FRR's BFD daemon the session is down. */
-	bs->bs_state = STATE_DOWN;
-	bs->bs_diag = bs->bs_rdiag = DIAG_CONTROL_EXPIRED;
-	bs->bs_rid = 0;
+
+	/*
+	 * RFC 5880 Section 6.8.6. Calculating the Detection Time
+	 *
+	 * > If Demand mode is not active, and a period of time equal to the
+	 * > Detection Time passes without receiving a BFD Control packet from
+	 * > the remote system, and bfd.SessionState is Init or Up, the session
+	 * > has gone down -- the local system MUST set bfd.SessionState to Down
+	 * > and bfd.LocalDiag to 1 (Control Detection Time Expired).
+	 */
+	if (bs->bs_state == STATE_INIT || bs->bs_state == STATE_UP) {
+		bs->bs_state = STATE_DOWN;
+		bs->bs_diag = DIAG_CONTROL_EXPIRED;
+		bs->bs_rid = 0;
+	}
 	bfddp_session_set_slowstart(bs);
 
 	/* Disable timers if configured for passive mode. */
@@ -493,6 +505,7 @@ bfddp_session_sm_down(struct bfd_session *bs, void *arg,
 		break;
 	case STATE_INIT:
 		bs->bs_state = STATE_UP;
+		bs->bs_diag = DIAG_NOTHING;
 
 		/* Start polling. */
 		bs->bs_poll = true;
@@ -520,6 +533,8 @@ bfddp_session_sm_init(struct bfd_session *bs, void *arg,
 	switch (nstate) {
 	case STATE_ADMINDOWN:
 		bs->bs_state = STATE_DOWN;
+		/* See RFC5880, Section 6.8.6 for peer diag with AdminDown */
+		bs->bs_diag = DIAG_DOWN;
 
 		/* Notify state change. */
 		bfddp_callbacks.bc_send_session_state_change(bs);
@@ -538,7 +553,7 @@ bfddp_session_sm_init(struct bfd_session *bs, void *arg,
 		/* FALLTHROUGH. */
 	case STATE_UP:
 		bs->bs_state = STATE_UP;
-		bs->bs_diag = 0;
+		bs->bs_diag = DIAG_NOTHING;
 
 		/* Start polling. */
 		bs->bs_poll = true;
@@ -562,6 +577,8 @@ bfddp_session_sm_up(struct bfd_session *bs, __attribute__((unused)) void *arg,
 {
 	switch (nstate) {
 	case STATE_ADMINDOWN:
+		/* See RFC5880, Section 6.8.6 for peer diag with AdminDown */
+		bs->bs_diag = DIAG_DOWN;
 		/* FALLTHROUGH. */
 	case STATE_DOWN:
 		bs->bs_state = STATE_DOWN;
@@ -1038,8 +1055,20 @@ bfddp_session_rx_echo_timeout(struct bfd_session *bs, void *arg)
 	bfddp_session_reset_remote(bs);
 
 	/* Tell FRR's BFD daemon the session is down. */
-	bs->bs_state = STATE_DOWN;
-	bs->bs_diag = bs->bs_rdiag = DIAG_ECHO_FAILED;
+
+	/*
+	 * RFC 5880 6.8.5.  Detecting Failures with the Echo Function
+	 *
+	 * > When the Echo function is active and a sufficient number of Echo
+	 * > packets have not arrived as they should, the session has gone down
+	 * > -- the local system MUST set bfd.SessionState to Down and
+	 * > bfd.LocalDiag to 2 (Echo Function Failed).
+	 */
+	if (bs->bs_state == STATE_UP) {
+		bs->bs_state = STATE_DOWN;
+		bs->bs_diag = DIAG_ECHO_FAILED;
+		bs->bs_rid = 0;
+	}
 	bfddp_session_set_slowstart(bs);
 
 	bfddp_callbacks.bc_rx_echo_stop(bs, arg);
