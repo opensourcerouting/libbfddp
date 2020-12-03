@@ -24,11 +24,13 @@
  */
 
 #include <arpa/inet.h>
+#include <netinet/tcp.h>
 #include <sys/poll.h>
 #include <sys/un.h>
 
 #include <err.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <signal.h>
 #include <stdio.h>
 #include <unistd.h>
@@ -39,6 +41,8 @@
 
 /** Verbose daemon configuration. */
 bool verbose = false;
+/** Server mode. */
+bool server_mode = false;
 /** Termination signal value. */
 volatile bool is_terminating = false;
 
@@ -83,7 +87,7 @@ usage(void)
 	extern const char *__progname;
 
 	fprintf(stderr,
-		"Usage: %s [-v] TYPE:ADDRESS[:PORT]\n\n"
+		"Usage: %s [-sv] TYPE:ADDRESS[:PORT]\n\n"
 		"Connects to BFD daemon HAL socket at ADDRESS using TYPE "
 		"optionally using PORT.\n\n"
 		"TYPE can be one of the following values:\n"
@@ -92,6 +96,7 @@ usage(void)
 		"  unix: to use an UNIX socket (special file).\n"
 		"\n"
 		"Options:\n"
+		"  -s: server mode (listen instead of connecting).\n"
 		"  -v: verbose (dump complete messages).\n",
 		__progname);
 
@@ -240,10 +245,17 @@ main(int argc, char *argv[])
 		struct sockaddr_un sun;
 	} addr;
 
-	while ((opt = getopt(argc, argv, "")) != -1) {
+	while ((opt = getopt(argc, argv, "sv")) != -1) {
 		switch (opt) {
+		case 's':
+			server_mode = true;
+			argc--;
+			argv++;
+			break;
 		case 'v':
 			verbose = true;
+			argc--;
+			argv++;
 			break;
 
 		default:
@@ -273,6 +285,121 @@ main(int argc, char *argv[])
 	return 0;
 }
 
+static int
+sock_set_nonblock(int sock)
+{
+	int flags;
+
+	/* Get socket flags */
+	flags = fcntl(sock, F_GETFL, NULL);
+	if (flags == -1)
+		return -1;
+
+	/* Check if NON_BLOCK is already set. */
+	if (flags & O_NONBLOCK)
+		return 0;
+
+	/* Set the NON_BLOCK flag. */
+	flags |= O_NONBLOCK;
+	if (fcntl(sock, F_SETFL, flags) == -1)
+		return -1;
+
+	return 0;
+}
+
+static int
+socktcp_set_nodelay(int sock)
+{
+	int value;
+
+	value = 1;
+	if (setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &value, sizeof(value)))
+		return -1;
+
+	return 0;
+}
+
+static int
+sock_set_reuseaddr(int sock)
+{
+	int value;
+
+	value = 1;
+	if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &value, sizeof(value)))
+		return -1;
+
+	return 0;
+}
+
+static int
+bfddp_listen(const struct sockaddr *sa, socklen_t salen)
+{
+	int sock;
+
+	sock = socket(sa->sa_family, SOCK_STREAM, 0);
+	if (sock == -1)
+		return -1;
+
+	/* Set socket non blocking, otherwise fail. */
+	if (sock_set_nonblock(sock) == -1)
+		goto close_and_fail;
+
+	/* Send packets as soon as we write to the socket. */
+	if (sa->sa_family != AF_UNIX && socktcp_set_nodelay(sock) == -1)
+		goto close_and_fail;
+
+	/* Avoid failing to bind. */
+	if (sock_set_reuseaddr(sock) == -1)
+		goto close_and_fail;
+
+	/* Bind the address and start the listening session. */
+	if (bind(sock, sa, salen) == -1)
+		goto close_and_fail;
+	if (listen(sock, 1) == -1)
+		goto close_and_fail;
+
+	return sock;
+
+close_and_fail:
+	close(sock);
+	return -1;
+}
+
+static void
+bfddp_accept(struct events_ctx *ec, int fd,
+	     __attribute__((unused)) short revents,
+	     __attribute__((unused)) void *args)
+{
+	struct bfddp_ctx *bctx;
+	int sd;
+
+	sd = accept(fd, NULL, NULL);
+	if (sd == -1) {
+		fprintf(stderr, "%s: accept: %s\n", __func__, strerror(errno));
+		return;
+	}
+
+	bctx = bfddp_new(0, 0);
+	if (bctx == NULL)
+		err(1, "%s: bfddp_new: %s", __func__, strerror(errno));
+
+	printf("%s: new connection accepted: %d\n", __func__, sd);
+
+	/* Set socket non blocking, otherwise fail. */
+	sock_set_nonblock(sd);
+
+	/* Send packets as soon as we write to the socket. */
+	socktcp_set_nodelay(sd);
+
+	bfddp_set_fd(bctx, sd);
+
+	/* Enqueue echo request. */
+	bfddp_send_echo_request(bctx);
+
+	/* Add our descriptor for read/write with new callback. */
+	events_ctx_add_fd(ec, sd, POLLIN | POLLOUT, bfddp_event, bctx);
+}
+
 /* Forward declaration. */
 static void bfddp_connect_event(struct events_ctx *ec, int fd, short revents,
 			        void *arg);
@@ -290,27 +417,33 @@ bfddp_main(const struct sockaddr *sa, socklen_t salen)
 	struct events_ctx *ec;
 	int shbfd = bfd_single_hop_socket();
 	int shebfd = bfd_single_hop_echo_socket();
+	int fbfd;
+
+	/* Initialize BFD sessions handler. */
+	bfd_session_init();
 
 	/* Create event handler. */
 	ec = events_ctx_new(64);
 	if (ec == NULL)
 		bfddp_err(1, "%s: events_ctx_new", __func__);
 
-	/* Allocate memory. */
-	bctx = bfddp_new(0, 0);
-	if (bctx == NULL)
-		bfddp_err(1, "%s: bfddp_new", __func__);
+	if (server_mode) {
+		fbfd = bfddp_listen(sa, salen);
+		events_ctx_add_fd(ec, fbfd, POLLIN, bfddp_accept, NULL);
+	} else {
+		/* Allocate memory. */
+		bctx = bfddp_new(0, 0);
+		if (bctx == NULL)
+			bfddp_err(1, "%s: bfddp_new", __func__);
 
-	/* Initialize BFD sessions handler. */
-	bfd_session_init();
+		/* Connect to BFD daemon. */
+		if (bfddp_connect(bctx, sa, salen) == -1)
+			bfddp_err(1, "%s: bfddp_connect", __func__);
 
-	/* Connect to BFD daemon. */
-	if (bfddp_connect(bctx, sa, salen) == -1)
-		bfddp_err(1, "%s: bfddp_connect", __func__);
-
-	/* Ask for events context to notify us. */
-	events_ctx_add_fd(ec, bfddp_get_fd(bctx), POLLOUT, bfddp_connect_event,
-			  bctx);
+		/* Ask for events context to notify us. */
+		events_ctx_add_fd(ec, bfddp_get_fd(bctx), POLLOUT,
+				  bfddp_connect_event, bctx);
+	}
 
 	/* Ask for events context to notify us of BFD control events. */
 	events_ctx_add_fd(ec, shbfd, POLLIN, bfd_single_hop_recv, NULL);
@@ -320,14 +453,6 @@ bfddp_main(const struct sockaddr *sa, socklen_t salen)
 
 	/* Main daemon loop. */
 	while (events_ctx_poll(ec) != -1) {
-		/*
-		 * Add our descriptor for read/write when there are writes
-		 * pending.
-		 */
-		if (bfddp_write_pending(bctx))
-			events_ctx_add_fd(ec, bfddp_get_fd(bctx),
-					  POLLIN | POLLOUT, bfddp_event, bctx);
-
 		/* Handle termination signals. */
 		if (is_terminating) {
 			/* Finish BFD session management resources. */
@@ -340,7 +465,7 @@ bfddp_main(const struct sockaddr *sa, socklen_t salen)
 			close(shbfd);
 
 			/* Free library memory. */
-			bfddp_terminate(bctx);
+			bfddp_terminate(NULL);
 			/* NOTREACHED */
 		}
 	}
@@ -390,7 +515,11 @@ bfddp_write_event(struct bfddp_ctx *bctx)
 		/* Connection closed. */
 		bfddp_log("%s: bfddp_write: closed connection\n",
 		          __func__);
-		is_terminating = true;
+
+		if (server_mode)
+			bfddp_free(bctx);
+		else
+			is_terminating = true;
 		return;
 	}
 	if (rv > 0)
@@ -412,7 +541,11 @@ bfddp_read_event(struct events_ctx *ec, struct bfddp_ctx *bctx)
 		/* Connection closed. */
 		bfddp_log("%s: bfddp_read: closed connection\n",
 				  __func__);
-		is_terminating = true;
+
+		if (server_mode)
+			bfddp_free(bctx);
+		else
+			is_terminating = true;
 		return;
 	}
 	if (rv > 0)
@@ -448,7 +581,8 @@ bfddp_terminate(struct bfddp_ctx *bctx)
 {
 	fprintf(stderr, "terminating\n");
 
-	bfddp_free(bctx);
+	if (bctx)
+		bfddp_free(bctx);
 
 	exit(0);
 }
