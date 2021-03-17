@@ -302,7 +302,7 @@ bfddp_session_update(struct bfd_session *bs, void *arg,
 	 * Echo mode changed, so start or stop the echo timers
 	 */
 	if (echo_changed && bs->bs_state == STATE_UP) {
-		if (bs->bs_echo) {
+		if (bs->bs_echo && bs->bs_rerx > 0) {
 			bfddp_callbacks.bc_rx_echo_update(bs, arg);
 			bfddp_callbacks.bc_tx_echo_update(bs, arg);
 		} else {
@@ -761,9 +761,12 @@ bfddp_session_rx_packet(struct bfd_session *bs, void *arg,
 
 		bfddp_callbacks.bc_tx_control_update(bs, arg);
 
-		if (bs->bs_echo) {
+		if (bs->bs_echo && bs->bs_rerx > 0) {
 			bfddp_callbacks.bc_tx_echo_update(bs, arg);
 			bfddp_callbacks.bc_rx_echo_update(bs, arg);
+		} else {
+			bfddp_callbacks.bc_tx_echo_stop(bs, arg);
+			bfddp_callbacks.bc_rx_echo_stop(bs, arg);
 		}
 
 		/* Tell control plane about timers change. */
