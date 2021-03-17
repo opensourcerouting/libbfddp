@@ -165,7 +165,7 @@ bfddp_session_update(struct bfd_session *bs, void *arg,
 	bool timers_changed = false;
 	struct in_addr *ia;
 	uint16_t port;
-	uint32_t min_rx, min_tx, min_erx;
+	uint32_t min_rx, min_tx, min_erx, min_etx;
 	uint8_t detect_mult;
 	uint32_t flags = ntohl(bds->flags);
 	bool echo_changed = false;
@@ -222,14 +222,16 @@ bfddp_session_update(struct bfd_session *bs, void *arg,
 	min_tx = ntohl(bds->min_tx);
 	min_rx = ntohl(bds->min_rx);
 	min_erx = ntohl(bds->min_echo_rx);
+	min_etx = ntohl(bds->min_echo_tx);
 	detect_mult = bds->detect_mult;
 	if (bs->bs_tx != min_tx || bs->bs_rx != min_rx || bs->bs_erx != min_erx
-	    || bs->bs_dmultiplier != detect_mult)
+	    || bs->bs_etx != min_etx || bs->bs_dmultiplier != detect_mult)
 		timers_changed = true;
 
 	bs->bs_tx = min_tx;
 	bs->bs_rx = min_rx;
 	bs->bs_erx = min_erx;
+	bs->bs_etx = min_etx;
 	bs->bs_hold = ntohl(bds->hold_time);
 	bs->bs_dmultiplier = detect_mult;
 
@@ -1111,8 +1113,8 @@ bfddp_session_next_echo_tx_interval(struct bfd_session *bs, bool add_jitter)
 	 * advertised value.  A single BFD Echo packet MAY be transmitted
 	 * between normally scheduled Echo transmission intervals.
 	 */
-	if (bs->bs_cur_erx > bs->bs_rerx)
-		selected_timer = bs->bs_cur_erx;
+	if (bs->bs_etx > bs->bs_rerx)
+		selected_timer = bs->bs_etx;
 	else
 		selected_timer = bs->bs_rerx;
 
