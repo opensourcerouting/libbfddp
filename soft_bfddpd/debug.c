@@ -107,12 +107,12 @@ void
 bfd_session_dump(const struct bfd_session *bs)
 {
 	bfd_session_debug(
-		bs, "%s%s%s%stx,rx,erx[%u,%u,%u r:%u,%u,%u] multi[%d, r:%d]",
+		bs, "%s%s%s%stx,rx,echo[%u,%u,(rx:%u, tx:%u) r:%u,%u,%u] multi[%d, r:%d]",
 		bs->bs_passive ? "passive " : "",
 		bs->bs_demand ? "demand " : "", bs->bs_cbit ? "cpi " : "",
 		bs->bs_echo ? "echo " : "", bs->bs_tx, bs->bs_rx, bs->bs_erx,
-		bs->bs_rtx, bs->bs_rrx, bs->bs_rerx, bs->bs_dmultiplier,
-		bs->bs_rdmultiplier);
+		bs->bs_etx, bs->bs_rtx, bs->bs_rrx, bs->bs_rerx,
+		bs->bs_dmultiplier, bs->bs_rdmultiplier);
 }
 
 const char *bfd_session_get_state_string(enum bfd_state_value state)

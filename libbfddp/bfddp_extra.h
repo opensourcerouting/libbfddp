@@ -91,6 +91,8 @@ struct bfd_session {
 	uint32_t bs_erx;
 	/** Current required minimum echo receive interval. */
 	uint32_t bs_cur_erx;
+	/** Required minimum echo receive interval. */
+	uint32_t bs_etx;
 	/** Milliseconds to wait before starting session. */
 	uint32_t bs_hold;
 	/** Detection multiplier. */
